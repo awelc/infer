@@ -25,4 +25,6 @@ val java_enabled : bool
 
 val xcode_enabled : bool
 
+val go_enabled : bool
+
 val man_pages_last_modify_date : string

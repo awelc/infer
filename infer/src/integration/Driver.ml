@@ -24,6 +24,7 @@ type mode =
   | Maven of string * string list
   | PythonCapture of Config.build_system * string list
   | XcodeXcpretty of string * string list
+  | Go of Go.compilation_type * string * string list
 [@@deriving compare]
 
 let equal_mode = [%compare.equal: mode]
@@ -50,6 +51,8 @@ let pp_mode fmt = function
       F.fprintf fmt "Maven driver mode:@\nprog = '%s'@\nargs = %a" prog Pp.cli_args args
   | Clang (_, prog, args) ->
       F.fprintf fmt "Clang driver mode:@\nprog = '%s'@\nargs = %a" prog Pp.cli_args args
+  | Go (_, prog, args) ->
+      F.fprintf fmt "Go driver mode:@\nprog = '%s'@\nargs = %a" prog Pp.cli_args args
 
 
 (* A clean command for each driver mode to be suggested to the user
@@ -297,6 +300,9 @@ let capture ~changed_files = function
         CaptureCompilationDatabase.get_compilation_database_files_xcodebuild ~prog ~args
       in
       capture_with_compilation_database ~changed_files json_cdb
+  | Go (compilation_type, prog, args) ->
+      if CLOpt.is_originator then L.progress "Capturing in go mode...@." ;
+      Go.capture compilation_type ~prog ~args
 
 
 (* shadowed for tracing *)
@@ -431,6 +437,8 @@ let assert_supported_mode required_analyzer requested_mode_string =
         Version.java_enabled
     | `Xcode ->
         Version.clang_enabled && Version.xcode_enabled
+    | `Go ->
+        Version.go_enabled
   in
   if not analyzer_enabled then
     let analyzer_string =
@@ -441,6 +449,8 @@ let assert_supported_mode required_analyzer requested_mode_string =
           "java"
       | `Xcode ->
           "clang and xcode"
+      | `Go ->
+          "go"
     in
     L.(die UserError)
       "Unsupported build mode: %s@\n\
@@ -469,7 +479,8 @@ let assert_supported_build_system build_system =
           (`Java, Config.string_of_build_system build_system) )
       in
       assert_supported_mode analyzer build_string
-
+  | BGo -> 
+      Config.string_of_build_system build_system |> assert_supported_mode `Go
 
 let mode_of_build_command build_cmd =
   match build_cmd with
@@ -511,7 +522,14 @@ let mode_of_build_command build_cmd =
              set --no-linters to disable them and this warning.@." ;
           PythonCapture (BBuck, build_cmd)
       | (BAnt | BBuck | BGradle | BNdk | BXcode) as build_system ->
-          PythonCapture (build_system, build_cmd) )
+          PythonCapture (build_system, build_cmd) 
+      (* for now match go build system with Java *)
+      | BGo ->
+        let comp_type = Go.string_of_type (List.hd args) in
+          let args_list_option = List.tl args in
+          match args_list_option with
+            | None -> Go (comp_type, prog, [])
+            | Some args_list -> Go (comp_type, prog, args_list) )
 
 
 let mode_from_command_line =

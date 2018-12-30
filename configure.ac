@@ -67,6 +67,15 @@ AC_ARG_ENABLE(java-analyzers,
 BUILD_JAVA_ANALYZERS=$enable_java_analyzers
 AC_SUBST([BUILD_JAVA_ANALYZERS])
 
+AC_ARG_ENABLE(go-analyzers,
+  AS_HELP_STRING([--disable-go-analyzers],
+    [do not build the Go analyzers (default is to build them)]),
+  ,
+  enable_go_analyzers=yes)
+
+BUILD_GO_ANALYZERS=$enable_go_analyzers
+AC_SUBST([BUILD_GO_ANALYZERS])
+
 AC_ARG_WITH(fcp-clang,
   AS_HELP_STRING([--with-fcp-clang],
     [use $CLANG_PREFIX/bin/clang to override the default compiler (default is not to override)]),

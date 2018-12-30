@@ -42,7 +42,8 @@ let all_checkers =
     ; active= Config.biabduction
     ; callbacks=
         [ (DynamicDispatch Interproc.analyze_procedure, Language.Clang)
-        ; (DynamicDispatch Interproc.analyze_procedure, Language.Java) ] }
+        ; (DynamicDispatch Interproc.analyze_procedure, Language.Java)
+        ; (DynamicDispatch Interproc.analyze_procedure, Language.Go) ] }
   ; { name= "buffer overrun"
     ; active=
         (Config.bufferoverrun || Config.quandaryBO) && not Config.cost
@@ -65,7 +66,9 @@ let all_checkers =
     ; callbacks= [(Procedure ImmutableChecker.callback_check_immutable_cast, Language.Java)] }
   ; { name= "liveness"
     ; active= Config.liveness
-    ; callbacks= [(Procedure Liveness.checker, Language.Clang)] }
+    ; callbacks= [(Procedure Liveness.checker, Language.Clang);
+                  (Procedure Liveness.checker, Language.Java);
+                  (Procedure Liveness.checker, Language.Go);] }
   ; { name= "printf args"
     ; active= Config.printf_args
     ; callbacks= [(Procedure PrintfArgs.callback_printf_args, Language.Java)] }
@@ -76,7 +79,8 @@ let all_checkers =
         ; (Procedure NullabilitySuggest.checker, Language.Clang) ] }
   ; { name= "ownership"
     ; active= Config.ownership
-    ; callbacks= [(Procedure Ownership.checker, Language.Clang)] }
+    ; callbacks= [(Procedure Ownership.checker, Language.Clang)
+                 ;(Procedure Ownership.checker, Language.Go)] }
   ; {name= "pulse"; active= Config.pulse; callbacks= [(Procedure Pulse.checker, Language.Clang)]}
   ; { name= "quandary"
     ; active= Config.quandary || Config.quandaryBO

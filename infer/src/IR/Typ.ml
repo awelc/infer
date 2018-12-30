@@ -19,6 +19,9 @@ module IntegerWidths = struct
 
   let java = {char_width= 16; short_width= 16; int_width= 32; long_width= 64; longlong_width= 64}
 
+  (* TODO Defnitely not sure about this *)
+  let go = {char_width= 16; short_width= 16; int_width= 32; long_width= 64; longlong_width= 64}
+
   module SQLite = SqliteUtils.MarshalledNullableData (struct
     type nonrec t = t
   end)
@@ -568,6 +571,19 @@ module Procname = struct
 
   let is_verbose v = match v with Verbose -> true | _ -> false
 
+  module Go = struct
+
+    type t = 
+      { name : string }
+    [@@deriving compare]
+
+    let make name  = { name }
+
+    let to_string {name} verbosity =
+      name ^ "()"
+
+  end
+
   module Java = struct
     type kind =
       | Non_Static
@@ -942,6 +958,7 @@ module Procname = struct
 
   (** Type of procedure names. *)
   type t =
+    | Go of Go.t
     | Java of Java.t
     | C of C.t
     | Linters_dummy_method
@@ -994,7 +1011,7 @@ module Procname = struct
         ObjC_Cpp {osig with class_name= new_class}
     | WithBlockParameters (base, blocks) ->
         WithBlockParameters (replace_class base new_class, blocks)
-    | C _ | Block _ | Linters_dummy_method ->
+    | Go _ | C _ | Block _ | Linters_dummy_method ->
         t
 
 
@@ -1026,7 +1043,7 @@ module Procname = struct
         ObjC_Cpp {osig with method_name= new_method_name}
     | WithBlockParameters (base, blocks) ->
         WithBlockParameters (objc_cpp_replace_method_name base new_method_name, blocks)
-    | C _ | Block _ | Linters_dummy_method | Java _ ->
+    | C _ | Block _ | Linters_dummy_method | Java _ | Go _ ->
         t
 
 
@@ -1040,6 +1057,8 @@ module Procname = struct
         QualifiedCppName.to_qual_string name
     | Block {name} ->
         name
+    | Go f ->
+        f.name
     | Java j ->
         j.method_name
     | Linters_dummy_method ->
@@ -1061,6 +1080,8 @@ module Procname = struct
         Language.Clang
     | WithBlockParameters _ ->
         Language.Clang
+    | Go _ ->
+        Language.Go
     | Java _ ->
         Language.Java
 
@@ -1107,6 +1128,8 @@ module Procname = struct
   (** Very verbose representation of an existing Procname.t *)
   let rec to_unique_id pn =
     match pn with
+    | Go f ->
+        Go.to_string f Verbose
     | Java j ->
         Java.to_string j Verbose
     | C osig ->
@@ -1124,6 +1147,8 @@ module Procname = struct
   (** Convert a proc name to a string for the user to see *)
   let rec to_string p =
     match p with
+    | Go f ->
+        Go.to_string f Non_verbose
     | Java j ->
         Java.to_string j Non_verbose
     | C osig ->
@@ -1141,6 +1166,8 @@ module Procname = struct
   (** Convenient representation of a procname for external tools (e.g. eclipse plugin) *)
   let rec to_simplified_string ?(withclass = false) p =
     match p with
+    | Go f ->
+        Go.to_string f Simple
     | Java j ->
         Java.to_string ~withclass j Simple
     | C osig ->
@@ -1179,6 +1206,8 @@ module Procname = struct
       List.map ~f:(fun par -> Parameter.ClangParameter par) clang_params
     in
     match procname with
+    | Go f ->
+        [] (* TODO: add Go function parameters *)
     | Java j ->
         List.map ~f:(fun par -> Parameter.JavaParameter par) (Java.get_parameters j)
     | C osig ->
@@ -1217,6 +1246,8 @@ module Procname = struct
         params
     in
     match procname with
+    | Go f ->
+        procname (* TODO implement replacing Go function params *)
     | Java j ->
         Java (Java.replace_parameters (params_to_java_params new_parameters) j)
     | C osig ->

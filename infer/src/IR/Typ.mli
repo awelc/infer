@@ -17,6 +17,8 @@ module IntegerWidths : sig
 
   val java : t
 
+  val go : t
+
   val load : SourceFile.t -> t option
 
   module SQLite : sig
@@ -303,6 +305,13 @@ type typ = t
 module Procname : sig
   (** Module for Procedure Names. *)
 
+  module Go : sig
+    type t [@@deriving compare]
+
+    val make : string -> t
+
+  end
+
   (** Type of java procedure names. *)
   module Java : sig
     type kind =
@@ -482,6 +491,7 @@ being the name of the struct, [None] means the parameter is of some other type. 
   bar() {foo(my_block)} is executed as  foo_my_block() {my_block(); }
   where foo_my_block is created with WithBlockParameters (foo, [my_block]) *)
   type t =
+    | Go of Go.t
     | Java of Java.t
     | C of C.t
     | Linters_dummy_method

@@ -25,6 +25,7 @@ function usage() {
   echo "   all      build everything (default)"
   echo "   clang    build C and Objective-C analyzer"
   echo "   java     build Java analyzer"
+  echo "   go       build Go analyzer"
   echo
   echo " options:"
   echo "   -h,--help             show this message"
@@ -42,6 +43,7 @@ function usage() {
 # arguments
 BUILD_CLANG=${BUILD_CLANG:-no}
 BUILD_JAVA=${BUILD_JAVA:-no}
+BUILD_GO=${BUILD_GO:-no}
 INFER_CONFIGURE_OPTS=${INFER_CONFIGURE_OPTS:-""}
 INFER_OPAM_SWITCH=${INFER_OPAM_SWITCH:-$INFER_OPAM_SWITCH_DEFAULT}
 INTERACTIVE=${INTERACTIVE:-yes}
@@ -58,6 +60,7 @@ while [[ $# > 0 ]]; do
     all)
       BUILD_CLANG=yes
       BUILD_JAVA=yes
+      BUILD_GO=yes
       shift
       continue
       ;;
@@ -68,6 +71,11 @@ while [[ $# > 0 ]]; do
       ;;
     java)
       BUILD_JAVA=yes
+      shift
+      continue
+      ;;
+    go)
+      BUILD_GO=yes
       shift
       continue
       ;;
@@ -103,9 +111,10 @@ while [[ $# > 0 ]]; do
 done
 
 # if no arguments then build both clang and Java
-if [ "$BUILD_CLANG" == "no" ] && [ "$BUILD_JAVA" == "no" ]; then
+if [ "$BUILD_CLANG" == "no" ] && [ "$BUILD_JAVA" == "no" ] && [ "$BUILD_GO" == "no" ]; then
   BUILD_CLANG=yes
   BUILD_JAVA=yes
+  BUILD_GO=yes
 fi
 
 # enable --yes option for some commands in non-interactive mode
@@ -158,6 +167,9 @@ if [ "$BUILD_CLANG" == "no" ]; then
 fi
 if [ "$BUILD_JAVA" == "no" ]; then
   INFER_CONFIGURE_OPTS+=" --disable-java-analyzers"
+fi
+if [ "$BUILD_GO" = "no" ]; then
+  INFER_CONFIGURE_OPTS+=" --disable-go-analyzers"
 fi
 
 ./configure $INFER_CONFIGURE_OPTS

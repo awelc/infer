@@ -80,12 +80,22 @@ let java_global_tenv =
         L.(die InternalError) "Could not load the global tenv"
     | Some tenv ->
         tenv )
+ 
+let go_global_tenv =
+  lazy
+    ( match Tenv.load_global () with
+    | None ->
+        L.(die InternalError) "Could not load the global tenv"
+    | Some tenv ->
+        tenv )
 
-
-let get_column_value ~value_on_java ~file_data_to_value ~column_name exe_env proc_name =
+let get_column_value ~value_on_java ~value_on_go ~file_data_to_value ~column_name exe_env proc_name =
   match proc_name with
   | Typ.Procname.Java _ ->
       Lazy.force value_on_java
+  (* TODO: I don't quite understand the whole environments business; needs refinement *)
+  | Typ.Procname.Go _ ->
+      Lazy.force value_on_go
   | _ -> (
     match get_file_data exe_env proc_name with
     | Some file_data -> (
@@ -106,14 +116,14 @@ let get_column_value ~value_on_java ~file_data_to_value ~column_name exe_env pro
 
 (** return the type environment associated to the procedure *)
 let get_tenv =
-  get_column_value ~value_on_java:java_global_tenv ~file_data_to_value:file_data_to_tenv
+  get_column_value ~value_on_java:java_global_tenv ~value_on_go:go_global_tenv ~file_data_to_value:file_data_to_tenv
     ~column_name:"tenv"
 
 
 (** return the integer type widths associated to the procedure *)
 let get_integer_type_widths =
   get_column_value
-    ~value_on_java:(lazy Typ.IntegerWidths.java)
+    ~value_on_java:(lazy Typ.IntegerWidths.java) ~value_on_go:(lazy Typ.IntegerWidths.go) 
     ~file_data_to_value:file_data_to_integer_type_widths ~column_name:"integer type widths"
 
 

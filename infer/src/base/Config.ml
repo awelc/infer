@@ -76,6 +76,7 @@ type build_system =
   | BMvn
   | BNdk
   | BXcode
+  | BGo
 [@@deriving compare]
 
 let equal_build_system = [%compare.equal: build_system]
@@ -90,6 +91,7 @@ let build_system_exe_assoc =
   ; (BGradle, "gradlew")
   ; (BJava, "java")
   ; (BJavac, "javac")
+  ; (BGo, "go")
   ; (BClang, "cc")
   ; (BClang, "clang")
   ; (BClang, "gcc")

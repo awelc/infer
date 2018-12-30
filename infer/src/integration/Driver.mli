@@ -21,6 +21,7 @@ type mode =
   | Maven of string * string list
   | PythonCapture of Config.build_system * string list
   | XcodeXcpretty of string * string list
+  | Go of Go.compilation_type * string * string list
 [@@deriving compare]
 
 val equal_mode : mode -> mode -> bool

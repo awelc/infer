@@ -19,7 +19,7 @@ INFER_MAIN = infer
 
 #### Checkers declarations ####
 
-INFER_ATDGEN_STUB_BASES = atd/jsonbug atd/runstate atd/stacktree atd/java_method_decl atd/perf_profiler atd/java_profiler_samples
+INFER_ATDGEN_STUB_BASES = atd/jsonbug atd/runstate atd/stacktree atd/java_method_decl atd/perf_profiler atd/java_profiler_samples atd/go_ast_to_json
 INFER_ATDGEN_TYPES = j t
 INFER_ATDGEN_STUB_ATDS = $(INFER_ATDGEN_STUB_BASES:.atd)
 INFER_ATDGEN_SUFFIXES = $(foreach atd_t,$(INFER_ATDGEN_TYPES),_$(atd_t).ml _$(atd_t).mli)
@@ -206,7 +206,7 @@ define gen_atdgen_rules
 #   3. the type of files to generate: b, j, t, or v
 
 $(2)_$(3).mli: $(1)
-	$(ATDGEN) -$(3) $$< -o $(2)
+	$(ATDGEN) -$(3) -rec $$< -o $(2)
 
 # the .ml depends on the corresponding .mli to avoid running atdgen
 # twice during parallel builds
@@ -255,6 +255,7 @@ $(GENERATED_FROM_AUTOCONF): $(MAKEFILE_LIST)
 	  -e "s|@INFER_GIT_BRANCH[@]|$$INFER_GIT_BRANCH|g" \
 	  -e "s|@BUILD_C_ANALYZERS[@]|$(BUILD_C_ANALYZERS)|g" \
 	  -e "s|@BUILD_JAVA_ANALYZERS[@]|$(BUILD_JAVA_ANALYZERS)|g" \
+	  -e "s|@BUILD_GO_ANALYZERS[@]|$(BUILD_GO_ANALYZERS)|g" \
 	  -e "s|@OPAMSWITCH[@]|$(OPAMSWITCH)|g" \
 	  -e "s|@XCODE_SELECT[@]|$(XCODE_SELECT)|g" \
 	  -e "s|@INFER_MAN_LAST_MODIFIED[@]|$(INFER_MAN_LAST_MODIFIED)|g" \

@@ -358,8 +358,8 @@ OPTIONS
 
        --force-integration command
            Proceed as if the first argument after -- was command. Possible
-           values: ant, buck, gradle, gradlew, java, javac, cc, clang, gcc,
-           clang++, c++, g++, make, configure, cmake, waf, mvn, mvnw,
+           values: ant, buck, gradle, gradlew, java, javac, go, cc, clang,
+           gcc, clang++, c++, g++, make, configure, cmake, waf, mvn, mvnw,
            ndk-build, xcodebuild.           See also infer-capture(1) and infer-run(1).
 
        --no-fragment-retains-view

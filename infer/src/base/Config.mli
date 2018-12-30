@@ -31,6 +31,7 @@ type build_system =
   | BMvn
   | BNdk
   | BXcode
+  | BGo
 [@@deriving compare]
 
 val equal_build_system : build_system -> build_system -> bool
