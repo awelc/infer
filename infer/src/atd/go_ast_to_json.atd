@@ -1,7 +1,16 @@
+type object_type =
+	[ FuncDecl of func_decl_type
+	| FuncDeclRef of int
+	| Field of field_type	
+	| FieldRef of int
+	| ValueSpec of value_spec_type
+	| ValueSpecRef of int ]
+
 type ident_type = {
 	ln <json name="Ln"> : int;
 	col <json name="Col"> : int;
-	id <json name="Id"> : string
+	id <json name="Id"> : string;
+	?obj <json name="Object"> : object_type option;
 }
 
 type star_expr_type = {
@@ -24,13 +33,22 @@ type basic_lit_type = {
 	value <json name="Value"> : string;		
 }
 
+type call_expr_type = {
+	lparen <json name="LParen"> : pos_type;
+	rparen <json name="RParen"> : pos_type;
+	fn <json name="Fun"> : expr_type;
+	args <json name="Args"> : expr_type list;
+}
+
 type expr_type = 
 	[ Ident of ident_type
 	| StarExpr of star_expr_type 
 	| UnaryExpr of unary_expr_type 
-	| BasicLit of basic_lit_type ]
+	| BasicLit of basic_lit_type
+	| CallExpr of call_expr_type ]
 
 type value_spec_type = {
+	uid <json name="Uid"> : int;
 	t <json name="Type"> : expr_type;
 	names <json name="Names"> : ident_type list;
 	values <json name="Values"> : expr_type list;
@@ -47,6 +65,7 @@ type gen_decl_type = {
 }
 
 type func_decl_type = {
+	uid <json name="Uid"> : int;
 	name <json name="Name"> : ident_type;
 	func_type <json name="FuncType"> : func_type_type;
 	body <json name="Body"> : body_type;
@@ -54,7 +73,8 @@ type func_decl_type = {
 
 type decl_type = 
 	[ GenDecl of gen_decl_type
-	| FuncDecl of func_decl_type ]
+	| FuncDecl of func_decl_type
+	| FuncDeclRef of int ]
 
 type decl_stmt_type = {
 	decl <json name="Decl"> : decl_type;
@@ -79,25 +99,29 @@ type stmt_type =
 	| AssignStmt of assign_stmt_type ]
 
 type field_type = {
+	uid <json name="Uid"> : int;
 	names <json name="Names"> : ident_type list;
     t <json name="Type"> : expr_type;
 }
 
+type field_list_el_type =
+	[ Field of field_type ]
+
 type func_type_type = {
 	ln <json name="Ln"> : int;
 	col <json name="Col"> : int;
-    params <json name="Params"> : field_type list;
-    results <json name="Results"> : field_type list;
+    params <json name="Params"> : field_list_el_type list;
+    results <json name="Results"> : field_list_el_type list;
 }
 
-type brace_type = {
+type pos_type = {
 	ln <json name="Ln"> : int;
 	col <json name="Col"> : int;	
 }
 
 type body_type = {
-	lbrace <json name="LBrace"> : brace_type;
-	rbrace <json name="RBrace"> : brace_type;
+	lbrace <json name="LBrace"> : pos_type;
+	rbrace <json name="RBrace"> : pos_type;
 	stmts <json name="StmtList"> : stmt_type list;
 }
 

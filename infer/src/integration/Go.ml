@@ -30,7 +30,7 @@ let do_file file_path =
   );
   ()
 
-(* TODO: environment-related functions borrowed from the Java front-end; needs refining *)
+(* TODO GO: environment-related functions borrowed from the Java front-end; needs refining *)
 
 (* load a stored global tenv if the file is found, and create a new one otherwise *)
 let load_tenv () =
@@ -50,7 +50,7 @@ let save_tenv tenv =
   Tenv.store_global tenv
 
 let capture compilation_type ~prog ~args =
-  let tenv = load_tenv () in (* TODO: at this point this is just to force creation of global environment *)
+  let tenv = load_tenv () in (* TODO GO: at this point this is just to force creation of global environment *)
     List.iter ~f:(do_file) args;
     save_tenv tenv;
     ()

@@ -1207,7 +1207,7 @@ module Procname = struct
     in
     match procname with
     | Go f ->
-        [] (* TODO: add Go function parameters *)
+        [] (* TODO GO: add Go function parameters *)
     | Java j ->
         List.map ~f:(fun par -> Parameter.JavaParameter par) (Java.get_parameters j)
     | C osig ->
@@ -1247,7 +1247,7 @@ module Procname = struct
     in
     match procname with
     | Go f ->
-        procname (* TODO implement replacing Go function params *)
+        procname (* TODO GO: implement replacing Go function params *)
     | Java j ->
         Java (Java.replace_parameters (params_to_java_params new_parameters) j)
     | C osig ->
