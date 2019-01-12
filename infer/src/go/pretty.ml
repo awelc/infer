@@ -18,7 +18,7 @@ and pretty_decl = function
     
 and pretty_func_decl fdecl = 
   match Hashtbl.find funcs_map fdecl.uid with
-    | None -> "func " ^ (pretty_ident fdecl.name) ^ (pretty_func_type fdecl.func_type) ^ " {\n" ^ (pretty_body fdecl.body) ^ "\n}\n"
+    | None -> "func " ^ (pretty_ident fdecl.name) ^ (pretty_func_type fdecl.func_type) ^ " {\n" ^ (pretty_stmt_type fdecl.body) ^ "\n}\n"
     | Some (s) -> s
 
 and pretty_value_spec (vspec : value_spec_type) : string =
@@ -55,7 +55,8 @@ and pretty_call_expr expr =
 and pretty_expr = function
   | `Ident (ident) -> pretty_ident ident
   | `StarExpr (expr)  -> pretty_star_expr expr
-  | `UnaryExpr (expr) -> expr.tok ^ pretty_expr expr.x
+  | `UnaryExpr (expr) -> expr.op ^ pretty_expr expr.x
+  | `BinaryExpr (expr) -> pretty_expr expr.x ^ " " ^ expr.op ^ " " ^ pretty_expr expr.y
   | `BasicLit (lit) -> lit.value  
   | `CallExpr (expr) -> pretty_call_expr expr
 
@@ -88,10 +89,18 @@ and pretty_assign_stmt stmt =
       pretty_expr lhs ^ " := " ^ pretty_expr rhs
   )
 
+and pretty_if_stmt stmt =
+  "if " ^ pretty_expr stmt.cond ^ " {\n" ^ pretty_stmt_type stmt.body ^ "\n}" ^
+  match stmt.el with
+    | Some (el) -> " else {\n" ^ pretty_stmt el ^ "\n}"
+    | None -> ""
+
 and pretty_stmt = function
   | `DeclStmt (stmt) -> pretty_decl_stmt stmt
   | `ReturnStmt (stmt) -> pretty_return_stmt stmt
   | `AssignStmt (stmt) -> pretty_assign_stmt stmt
+  | `BlockStmt (stmt) -> pretty_stmt_type stmt
+  | `IfStmt (stmt) -> pretty_if_stmt stmt
 
-and pretty_body body =
+and pretty_stmt_type body =
   concatmap "\n" pretty_stmt body.stmts

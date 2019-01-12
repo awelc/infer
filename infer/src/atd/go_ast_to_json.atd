@@ -22,8 +22,16 @@ type star_expr_type = {
 type unary_expr_type = {
 	ln <json name="Ln"> : int;
 	col <json name="Col"> : int;
-	tok <json name="Tok"> : string;
+	op <json name="Op"> : string;
 	x <json name="X"> : expr_type;
+}
+
+type binary_expr_type = {
+	ln <json name="Ln"> : int;
+	col <json name="Col"> : int;
+	op <json name="Op"> : string;
+	x <json name="X"> : expr_type;
+	y <json name="Y"> : expr_type;
 }
 
 type basic_lit_type = {
@@ -44,6 +52,7 @@ type expr_type =
 	[ Ident of ident_type
 	| StarExpr of star_expr_type 
 	| UnaryExpr of unary_expr_type 
+	| BinaryExpr of binary_expr_type 
 	| BasicLit of basic_lit_type
 	| CallExpr of call_expr_type ]
 
@@ -68,7 +77,7 @@ type func_decl_type = {
 	uid <json name="Uid"> : int;
 	name <json name="Name"> : ident_type;
 	func_type <json name="FuncType"> : func_type_type;
-	body <json name="Body"> : body_type;
+	body <json name="Body"> : block_stmt_type;
 }
 
 type decl_type = 
@@ -96,7 +105,9 @@ type assign_stmt_type = {
 type stmt_type =
 	[ DeclStmt of decl_stmt_type
 	| ReturnStmt of return_stmt_type 
-	| AssignStmt of assign_stmt_type ]
+	| AssignStmt of assign_stmt_type
+	| BlockStmt of block_stmt_type
+	| IfStmt of if_stmt_type ]
 
 type field_type = {
 	uid <json name="Uid"> : int;
@@ -119,10 +130,18 @@ type pos_type = {
 	col <json name="Col"> : int;	
 }
 
-type body_type = {
+type block_stmt_type = {
 	lbrace <json name="LBrace"> : pos_type;
 	rbrace <json name="RBrace"> : pos_type;
 	stmts <json name="StmtList"> : stmt_type list;
+}
+
+type if_stmt_type = {
+	ln <json name="Ln"> : int;
+	col <json name="Col"> : int;
+	cond <json name="Cond"> : expr_type;
+	body <json name="Body"> : block_stmt_type;
+	?el <json name="Else"> : stmt_type option;
 }
 
 type file_type = {

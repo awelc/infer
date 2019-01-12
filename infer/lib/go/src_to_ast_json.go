@@ -67,6 +67,26 @@ func ident_print(id ast.Ident, fset token.FileSet, ind int) {
 	fmt.Printf("%s}\n", pad(ind))
 }
 
+func block_print(bs ast.BlockStmt, fset token.FileSet, ind int) {
+	fmt.Printf("%s{\n", pad(ind))
+	lpos := fset.PositionFor(bs.Lbrace, true)
+	fmt.Printf("%s\"LBrace\":{\"Ln\":%d, \"Col\":%d},\n",
+		pad(ind+indInc), lpos.Line, lpos.Column)
+	rpos := fset.PositionFor(bs.Rbrace, true)
+	fmt.Printf("%s\"RBrace\":{\"Ln\":%d, \"Col\":%d},\n",
+		pad(ind+indInc), rpos.Line, rpos.Column)
+	fmt.Printf("%s\"StmtList\":\n", pad(ind+indInc))
+	fmt.Printf("%s[\n", pad(ind+indInc))
+	for i, s := range bs.List {
+		if i > 0 {
+			fmt.Printf("%s,\n", pad(ind+2*indInc))
+		}
+		json_print(s, fset, ind+2*indInc)
+	}
+	fmt.Printf("%s]\n", pad(ind+indInc))
+	fmt.Printf("%s}\n", pad(ind))
+}
+
 func json_print(node ast.Node, fset token.FileSet, ind int) {
 	switch /*t := */ node.(type) {
 	case *ast.File:
@@ -100,7 +120,7 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 			json_print(fd.Type, fset, ind+2*indInc)
 			fmt.Printf("%s,\n", pad(ind+2*indInc))
 			fmt.Printf("%s\"Body\":\n", pad(ind+2*indInc))
-			json_print(fd.Body, fset, ind+2*indInc)
+			block_print(*fd.Body, fset, ind+2*indInc)
 			fmt.Printf("%s}\n", pad(ind+indInc))
 		}
 		fmt.Printf("%s]\n", pad(ind))
@@ -178,31 +198,33 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 		ue := node.(*ast.UnaryExpr)
 		fmt.Printf("%s{\n", pad(ind+2*indInc))
 		pos := fset.PositionFor(ue.OpPos, true)
-		fmt.Printf("%s\"Ln\":%d, \"Col\":%d, \"Tok\":\"%s\",\n",
+		fmt.Printf("%s\"Ln\":%d, \"Col\":%d, \"Op\":\"%s\",\n",
 			pad(ind+3*indInc), pos.Line, pos.Column, ue.Op.String())
 		fmt.Printf("%s\"X\":\n", pad(ind+3*indInc))
 		json_print(ue.X, fset, ind+4*indInc)
 		fmt.Printf("%s}\n", pad(ind+2*indInc))
 		fmt.Printf("%s]\n", pad(ind))
+	case *ast.BinaryExpr:
+		fmt.Printf("%s[\n", pad(ind))
+		fmt.Printf("%s\"BinaryExpr\",\n", pad(ind+indInc))
+		be := node.(*ast.BinaryExpr)
+		fmt.Printf("%s{\n", pad(ind+2*indInc))
+		pos := fset.PositionFor(be.OpPos, true)
+		fmt.Printf("%s\"Ln\":%d, \"Col\":%d, \"Op\":\"%s\",\n",
+			pad(ind+3*indInc), pos.Line, pos.Column, be.Op.String())
+		fmt.Printf("%s\"X\":\n", pad(ind+3*indInc))
+		json_print(be.X, fset, ind+4*indInc)
+		fmt.Printf("%s,\n", pad(ind+3*indInc))
+		fmt.Printf("%s\"Y\":\n", pad(ind+3*indInc))
+		json_print(be.Y, fset, ind+4*indInc)
+		fmt.Printf("%s}\n", pad(ind+2*indInc))
+		fmt.Printf("%s]\n", pad(ind))
 	case *ast.BlockStmt:
-		fmt.Printf("%s{\n", pad(ind))
+		fmt.Printf("%s[\n", pad(ind))
+		fmt.Printf("%s\"BlockStmt\",\n", pad(ind+indInc))
 		bs := node.(*ast.BlockStmt)
-		lpos := fset.PositionFor(bs.Lbrace, true)
-		fmt.Printf("%s\"LBrace\":{\"Ln\":%d, \"Col\":%d},\n",
-			pad(ind+indInc), lpos.Line, lpos.Column)
-		rpos := fset.PositionFor(bs.Rbrace, true)
-		fmt.Printf("%s\"RBrace\":{\"Ln\":%d, \"Col\":%d},\n",
-			pad(ind+indInc), rpos.Line, rpos.Column)
-		fmt.Printf("%s\"StmtList\":\n", pad(ind+indInc))
-		fmt.Printf("%s[\n", pad(ind+indInc))
-		for i, s := range bs.List {
-			if i > 0 {
-				fmt.Printf("%s,\n", pad(ind+2*indInc))
-			}
-			json_print(s, fset, ind+2*indInc)
-		}
-		fmt.Printf("%s]\n", pad(ind+indInc))
-		fmt.Printf("%s}\n", pad(ind))
+		block_print(*bs, fset, ind+indInc)
+		fmt.Printf("%s]\n", pad(ind))
 	case *ast.ReturnStmt:
 		fmt.Printf("%s[\n", pad(ind))
 		fmt.Printf("%s\"ReturnStmt\",\n", pad(ind+indInc))
@@ -345,6 +367,26 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 			fmt.Printf("%s]\n", pad(ind+2*indInc))
 			fmt.Printf("%s}\n", pad(ind+indInc))
 		}
+		fmt.Printf("%s]\n", pad(ind))
+	case *ast.IfStmt:
+		fmt.Printf("%s[\n", pad(ind))
+		fmt.Printf("%s\"IfStmt\",\n", pad(ind+indInc))
+		fmt.Printf("%s{\n", pad(ind+indInc))
+		is := node.(*ast.IfStmt)
+		pos := fset.PositionFor(is.If, true)
+		fmt.Printf("%s\"Ln\":%d, \"Col\":%d,\n",
+			pad(ind+2*indInc), pos.Line, pos.Column)
+		fmt.Printf("%s\"Cond\":\n", pad(ind+2*indInc))
+		json_print(is.Cond, fset, ind+2*indInc)
+		fmt.Printf("%s,\n", pad(ind+2*indInc))
+		fmt.Printf("%s\"Body\":\n", pad(ind+2*indInc))
+		block_print(*is.Body, fset, ind+2*indInc)
+		if is.Else != nil {
+			fmt.Printf("%s,\n", pad(ind+2*indInc))
+			fmt.Printf("%s\"Else\":\n", pad(ind+2*indInc))
+			json_print(is.Else, fset, ind+2*indInc)
+		}
+		fmt.Printf("%s}\n", pad(ind+indInc))
 		fmt.Printf("%s]\n", pad(ind))
 	}
 

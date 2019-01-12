@@ -6,8 +6,20 @@ let line_loc_mk_src source_file l = { Location.line = l; col = -1; file = source
 
 let line_loc_mk_proc proc_desc l = line_loc_mk_src (Procdesc.get_attributes proc_desc).translation_unit l
 
-let create_node proc_desc instructions line = 
-  Procdesc.create_node proc_desc (line_loc_mk_proc proc_desc line) (Procdesc.Node.Stmt_node MethodBody) instructions
+let get_binop (str: string) =
+  match str with
+    | "==" -> Binop.Eq, true
+    | ">=" -> Binop.Ge, true
+    | ">"  -> Binop.Gt, true
+    | "<=" -> Binop.Le, true
+    | "<"  -> Binop.Lt, true
+    | "!=" -> Binop.Ne, true
+
+let create_node (context: Context.t) instructions loc kind =
+  context.node_count <- context.node_count + 1; Procdesc.create_node context.proc_desc loc kind instructions
+
+let create_node_method (context: Context.t) instructions loc =
+  create_node context instructions loc (Procdesc.Node.Stmt_node MethodBody)
 
 let rec create_fn_desc (go_cfg : Context.gocfg) = function
   | `FuncDecl (decl) -> trans_func_decl go_cfg decl
@@ -42,12 +54,19 @@ and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t *
         let load_instr = Sil.Load (id, ptr_var, var_type, line_loc_mk_proc context.proc_desc expr.ln) in
         load_ptr_list @ [load_instr], Exp.Var id, var_type
       | `UnaryExpr (expr) ->
-        (match expr.tok with
+        (match expr.op with
           | "&" -> 
             (match expr.x with
               | `Ident (ident) -> (* must be a variable *)
                 let (pvar, var_type) = Context.LocalsMap.find ident.id context.locals_map in
                   [], Exp.Lvar pvar, Typ.mk (Typ.Tptr (var_type, Typ.Pk_pointer)) ) )
+      | `BinaryExpr (expr) ->
+        let binop, is_bool = get_binop expr.op in
+        let l_inst_list, l_var, _ = trans_exp context expr.x in
+        let r_inst_list, r_var, _ = trans_exp context expr.y in
+          if (is_bool) then l_inst_list @ r_inst_list, Exp.BinOp (binop, l_var, r_var), Typ.mk (Tint Typ.IBool)
+          else (raise (Failure "Should not happen"))
+
       | `BasicLit (lit) ->
         (match lit.kind with
           | "INT" -> 
@@ -88,11 +107,12 @@ and trans_type = function
   | `StarExpr (expr) -> 
       Typ.mk (Typ.Tptr (trans_type expr.x, Typ.Pk_pointer))
   | `UnaryExpr (expr) -> raise (Failure "Should not happen")
+  | `BinaryExpr (expr) -> raise (Failure "Should not happen")
   | `BasicLit (list) -> raise (Failure "Should not happen")
   | `CallExpr (expr) -> raise (Failure "Should not happen")
 
 and trans_body context body =
-  List.map ~f:(fun (stmt) -> trans_stmt context stmt) body.stmts
+  List.fold ~f:(fun nodes stmt -> nodes @ (trans_stmt context stmt)) ~init:([]) body.stmts
 
 and trans_decl_stmt context stmt =
   trans_decl context stmt.decl
@@ -103,8 +123,11 @@ and trans_return_stmt (context : Context.t) (stmt : return_stmt_type) =
     let ret_var = Pvar.get_ret_pvar (Procdesc.get_proc_name context.proc_desc) in
     let ret_type = Procdesc.get_ret_type context.proc_desc in
     let ex_instr, ex_val, _ = trans_exp context ex in
-    let return_instr = Sil.Store (Exp.Lvar ret_var, ret_type, ex_val, line_loc_mk_proc context.proc_desc stmt.ln) in
-      create_node context.proc_desc (ex_instr @ [return_instr]) stmt.ln
+    let loc = line_loc_mk_proc context.proc_desc stmt.ln in
+    let return_instr = Sil.Store (Exp.Lvar ret_var, ret_type, ex_val, loc) in
+    let ret_node_id = context.node_count in
+      context.goto_branches <- Context.BranchesMap.add ret_node_id Context.Exit context.goto_branches;
+      [create_node_method context (ex_instr @ [return_instr]) loc]
   )
 
 and trans_assign_stmt (context : Context.t) stmt =
@@ -126,15 +149,55 @@ and trans_assign_stmt (context : Context.t) stmt =
                 pvar               
           in
             let pvar = var_lookup in
-            let assign_instr = Sil.Store (Exp.Lvar pvar, ex_type, ex_val, line_loc_mk_proc context.proc_desc stmt.ln) in
-              create_node context.proc_desc (ex_instr @ [assign_instr]) stmt.ln
+            let loc = line_loc_mk_proc context.proc_desc stmt.ln in
+            let assign_instr = Sil.Store (Exp.Lvar pvar, ex_type, ex_val, loc) in
+              [create_node_method context (ex_instr @ [assign_instr]) loc]
 
   )
+
+and trans_if_stmt (context : Context.t) stmt =
+  let cond_instr, cond_val, _ = trans_exp context stmt.cond in
+  let not_cond_val = Exp.UnOp (Unop.LNot, cond_val, None) in
+  let loc = line_loc_mk_proc context.proc_desc stmt.ln in
+  let prune_instr_true = Sil.Prune (cond_val, loc, true, Sil.Ik_if) in
+  let prune_instr_false = Sil.Prune (not_cond_val, loc, false, Sil.Ik_if) in
+  let node_kind_true = Procdesc.Node.Prune_node (true, Sil.Ik_if, "method_body") in
+  let node_kind_false = Procdesc.Node.Prune_node (false, Sil.Ik_if, "method_body") in
+  let pred_node_id = context.node_count - 1 in
+  let prune_node_true = create_node context (cond_instr @ [prune_instr_true]) loc node_kind_true in
+  let body_nodes = trans_body context stmt.body in
+  let last_body_node_id = context.node_count - 1 in
+  let prune_node_false = create_node context (cond_instr @ [prune_instr_false]) loc node_kind_false in
+  let prune_node_false_id = context.node_count - 1 in
+  let next_node_id = context.node_count in
+  let link_last_branch_node last_node_id =
+    (* link the last node of a branch with if statement's continuation unless the this node represents a return *)
+    match Context.BranchesMap.find_opt last_node_id context.goto_branches with 
+      | None -> context.goto_branches <- Context.BranchesMap.add last_node_id (Context.Index next_node_id) context.goto_branches
+      | Some (target) -> match target with | Context.Exit -> () | Context.Index (_) -> raise (Failure "Index jump instead of expected exit jump") in
+
+    (* link previous node with the false prune node - connection with true prune node will be done by falling through *)
+    context.if_branches <- Context.BranchesMap.add pred_node_id (Context.Index prune_node_false_id) context.if_branches;
+    (* link the last node of the true branch with if statement's continuation if necessary *)
+    link_last_branch_node last_body_node_id;
+    match stmt.el with
+      | None ->
+        (* return the list of nodes - all connections are already made *)
+        prune_node_true :: body_nodes @ [prune_node_false]
+      | Some (el) ->
+        (* compute else nodes and link the last node of the false branch with if statement's continuation if necessary *)
+        let else_nodes = trans_stmt context el in
+        let last_else_node_id = context.node_count - 1 in      
+        link_last_branch_node last_else_node_id;
+        prune_node_true :: body_nodes @ [prune_node_false] @ else_nodes;
+
 
 and trans_stmt context = function
   | `DeclStmt (stmt) -> trans_decl_stmt context stmt
   | `ReturnStmt (stmt) -> trans_return_stmt context stmt
   | `AssignStmt (stmt) -> trans_assign_stmt context stmt
+  | `BlockStmt (stmt) -> trans_body context stmt
+  | `IfStmt (stmt) -> trans_if_stmt context stmt
 
 and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
   if ((List.length spec.names > 1) || (List.length spec.values > 1)) then raise (Failure "Only single variable declaration supported for now") else (
@@ -144,12 +207,13 @@ and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
     let ex = List.nth_exn spec.values 0 in
     let pvar = Pvar.mk var_name (Procdesc.get_proc_name context.proc_desc) in
     let ex_instr, ex_val, ex_type = trans_exp context ex in
-    let decl_instr = Sil.Store (Exp.Lvar pvar, ex_type, ex_val, line_loc_mk_proc context.proc_desc ln) in
+    let loc = line_loc_mk_proc context.proc_desc ln in
+    let decl_instr = Sil.Store (Exp.Lvar pvar, ex_type, ex_val, loc) in
     let var : ProcAttributes.var_data = {name = var_name; typ = ex_type; modify_in_block = false; is_constexpr = false} in
       if (not (Typ.equal t ex_type)) then raise (Failure "Incorrect type assigned in declaration") else ();
       context.locals_map <- Context.LocalsMap.add name (pvar, ex_type) context.locals_map;
       context.locals_list <- var :: context.locals_list;
-      create_node context.proc_desc (ex_instr @ [decl_instr]) ln
+      [create_node_method context (ex_instr @ [decl_instr]) loc]
  )
 
 and trans_spec context ln = function
@@ -161,6 +225,34 @@ and trans_gen_decl context decl =
     match decl.tok with
       | "var" -> trans_spec context decl.ln (List.nth_exn decl.specs 0)
   )
+
+and add_edges (context: Context.t) func_nodes_array exit_nodes =
+  let proc_desc = context.proc_desc in
+  let last_node_ind = Array.length func_nodes_array - 1 in
+  let link_nodes node_ind node =
+    if (node_ind < last_node_ind) then ( (* omit exit node *)
+      let current_node = Array.get func_nodes_array node_ind in
+      match Context.BranchesMap.find_opt node_ind context.goto_branches with
+          (* goto nodes only link with the target node *)
+        | Some (target) -> 
+          let target_node_id = match target with | Context.Index (id) -> id | Context.Exit -> last_node_ind in
+          let target_node = Array.get func_nodes_array target_node_id in
+            Procdesc.node_set_succs_exn proc_desc current_node [target_node] exit_nodes
+          (* other nodes link with the following node and, in case of if nodes, also with the target node*)
+        | None ->
+          let next_node = Array.get func_nodes_array (node_ind + 1) in
+          match Context.BranchesMap.find_opt node_ind context.if_branches with
+            | Some (target) ->
+              let target_node_id = match target with | Context.Index (id) -> id | Context.Exit -> last_node_ind in
+              let target_node = Array.get func_nodes_array target_node_id in
+                Procdesc.node_set_succs_exn proc_desc current_node (next_node :: [target_node]) exit_nodes
+            | None ->
+              Procdesc.node_set_succs_exn proc_desc current_node [next_node] exit_nodes;
+
+
+    )
+  in
+    Array.iteri ~f:link_nodes func_nodes_array
 
 and trans_func_decl (go_cfg : Context.gocfg) decl =
   let func_type = decl.func_type in
@@ -177,9 +269,6 @@ and trans_func_decl (go_cfg : Context.gocfg) decl =
         loc = loc_start;
         ret_type = trans_res_type (List.nth_exn func_type.results 0) } in
     let proc_desc = Cfg.create_proc_desc go_cfg.cfg proc_attributes in
-    let start_node = Procdesc.create_node proc_desc loc_start Procdesc.Node.Start_node [] in
-    let exit_node = Procdesc.create_node proc_desc loc_exit Procdesc.Node.Exit_node [] in
-    let exit_nodes = [exit_node] in    
     let context = Context.create_context proc_desc go_cfg in
     let param_to_local = function
       | (n, t) -> 
@@ -187,18 +276,17 @@ and trans_func_decl (go_cfg : Context.gocfg) decl =
         let var : ProcAttributes.var_data = {name = n; typ = t; modify_in_block = false; is_constexpr = false} in
           context.locals_map <- Context.LocalsMap.add (Mangled.to_string n) (pvar, t) context.locals_map
     in
-    let rec link_nodes pred_node = function
-        | [] -> Procdesc.node_set_succs_exn proc_desc pred_node exit_nodes exit_nodes (* pred_node is last node - needs to be connected to the sink *)
-        | next_node :: tail_nodes -> (Procdesc.node_set_succs_exn proc_desc pred_node [next_node] exit_nodes; link_nodes next_node tail_nodes ) in
-          if (not(context.go_cfg == go_cfg)) then raise (Failure "CFG's not equal");
-          go_cfg.func_decls <- Context.FuncDeclsMap.add decl.uid proc_desc go_cfg.func_decls;
-          List.iter params param_to_local;
-          Procdesc.set_start_node proc_desc start_node;
-          Procdesc.set_exit_node proc_desc exit_node;
-          Procdesc.node_set_succs_exn proc_desc start_node exit_nodes exit_nodes;
-          link_nodes start_node (trans_body context body);
-          Procdesc.append_locals proc_desc (List.rev context.locals_list);
-          ()
+    let start_node = create_node context [] loc_start Procdesc.Node.Start_node in
+    let func_nodes = List.iter params param_to_local; trans_body context body in
+    let exit_node = create_node context [] loc_exit Procdesc.Node.Exit_node in
+    let exit_nodes = [exit_node] in    
+      go_cfg.func_decls <- Context.FuncDeclsMap.add decl.uid proc_desc go_cfg.func_decls;
+      Procdesc.set_start_node proc_desc start_node;
+      Procdesc.set_exit_node proc_desc exit_node;
+(*)      Procdesc.node_set_succs_exn proc_desc start_node exit_nodes exit_nodes;*)
+      add_edges context (Array.of_list ((start_node :: func_nodes) @ exit_nodes)) exit_nodes;
+      Procdesc.append_locals proc_desc (List.rev context.locals_list);
+      ()
   )
 
 and trans_decl context = function
@@ -215,5 +303,5 @@ let compute_icfg source_file =
   let _ = Unix.close_process_in stdout in
 (*    print_endline (Pretty.pretty_file go_file); *)
     let go_cfg = Context.create_cfg source_file in
-      List.iter ~f:(fun (decl) -> create_fn_desc go_cfg decl) go_file.decls;
+     List.iter ~f:(fun (decl) -> create_fn_desc go_cfg decl) go_file.decls;
       go_cfg.cfg

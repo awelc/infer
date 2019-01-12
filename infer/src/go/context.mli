@@ -2,7 +2,13 @@
 
 module LocalsMap : Caml.Map.S with type key = string
 
+module IntMap : Caml.Map.S with type key = int
+
 module FuncDeclsMap : Caml.Map.S with type key = int
+
+module BranchesMap : Caml.Map.S with type key = int
+
+type jump_kind = Index of int | Exit
 
 type gocfg = 
 	{ cfg: Cfg.t
@@ -13,6 +19,9 @@ type t =
 	{ proc_desc: Procdesc.t
  	; mutable locals_map : (Pvar.t * Typ.t) LocalsMap.t
 	; mutable locals_list : ProcAttributes.var_data list
+	; mutable if_branches : jump_kind BranchesMap.t
+	; mutable goto_branches : jump_kind BranchesMap.t
+	; mutable node_count: int
 	; go_cfg : gocfg } 
 
 val create_context : Procdesc.t -> gocfg -> t
