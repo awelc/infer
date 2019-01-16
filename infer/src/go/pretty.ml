@@ -89,11 +89,17 @@ and pretty_assign_stmt stmt =
       pretty_expr lhs ^ " := " ^ pretty_expr rhs
   )
 
-and pretty_if_stmt stmt =
+and pretty_if_stmt (stmt: if_stmt_type) =
   "if " ^ pretty_expr stmt.cond ^ " {\n" ^ pretty_stmt_type stmt.body ^ "\n}" ^
   match stmt.el with
     | Some (el) -> " else {\n" ^ pretty_stmt el ^ "\n}"
     | None -> ""
+
+and pretty_for_stmt stmt =
+  "for " ^ pretty_stmt stmt.init ^ "; " ^ pretty_expr stmt.cond ^ "; " ^ pretty_stmt stmt.post ^ " {\n" ^ pretty_stmt_type stmt.body ^ "\n}" 
+
+and pretty_inc_dec_stmt stmt =
+  pretty_expr stmt.x ^ stmt.op
 
 and pretty_stmt = function
   | `DeclStmt (stmt) -> pretty_decl_stmt stmt
@@ -101,6 +107,8 @@ and pretty_stmt = function
   | `AssignStmt (stmt) -> pretty_assign_stmt stmt
   | `BlockStmt (stmt) -> pretty_stmt_type stmt
   | `IfStmt (stmt) -> pretty_if_stmt stmt
+  | `ForStmt (stmt) -> pretty_for_stmt stmt
+  | `IncDecStmt (stmt) -> pretty_inc_dec_stmt stmt
 
 and pretty_stmt_type body =
   concatmap "\n" pretty_stmt body.stmts

@@ -16,10 +16,12 @@ const indInc = 2
 var field_count int64 = 0
 var func_decl_count int64 = 0
 var value_spec_count int64 = 0
+var assign_stmt_count int64 = 0
 
 var fields map[*ast.Field]int64 = make(map[*ast.Field]int64)
 var func_decls map[*ast.FuncDecl]int64 = make(map[*ast.FuncDecl]int64)
 var value_specs map[*ast.ValueSpec]int64 = make(map[*ast.ValueSpec]int64)
+var assign_stmts map[*ast.AssignStmt]int64 = make(map[*ast.AssignStmt]int64)
 
 func main() {
 	args := os.Args
@@ -48,6 +50,8 @@ func obj_print(obj ast.Object, fset token.FileSet, ind int) {
 	case *ast.Field:
 		json_print(n, fset, ind+indInc)
 	case *ast.ValueSpec:
+		json_print(n, fset, ind+indInc)
+	case *ast.AssignStmt:
 		json_print(n, fset, ind+indInc)
 	default:
 		log.Fatal("Unsupported ast object type (for now)")
@@ -276,32 +280,40 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 			pad(ind), pos.Line, pos.Column, bl.Kind.String(), bl.Value)
 	case *ast.AssignStmt:
 		fmt.Printf("%s[\n", pad(ind))
-		fmt.Printf("%s\"AssignStmt\",\n", pad(ind+indInc))
-		fmt.Printf("%s{\n", pad(ind+indInc))
 		as := node.(*ast.AssignStmt)
-		pos := fset.PositionFor(as.TokPos, true)
-		fmt.Printf("%s\"Ln\":%d, \"Col\":%d,\n",
-			pad(ind+2*indInc), pos.Line, pos.Column)
-		fmt.Printf("%s\"Lhs\":\n", pad(ind+2*indInc))
-		fmt.Printf("%s[\n", pad(ind*2+indInc))
-		for i, e := range as.Lhs {
-			if i > 0 {
-				fmt.Printf("%s,\n", pad(ind+3*indInc))
+		uid, found := assign_stmts[as]
+		if found {
+			fmt.Printf("%s\"AssignStmtRef\", %d\n", pad(ind+indInc), uid)
+		} else {
+			fmt.Printf("%s\"AssignStmt\",\n", pad(ind+indInc))
+			fmt.Printf("%s{\n", pad(ind+indInc))
+			assign_stmt_uid := assign_stmt_count
+			assign_stmts[as] = assign_stmt_uid
+			assign_stmt_count++
+			pos := fset.PositionFor(as.TokPos, true)
+			fmt.Printf("%s\"Ln\":%d, \"Col\":%d,\n",
+				pad(ind+2*indInc), pos.Line, pos.Column)
+			fmt.Printf("%s\"Lhs\":\n", pad(ind+2*indInc))
+			fmt.Printf("%s[\n", pad(ind+2+indInc))
+			for i, e := range as.Lhs {
+				if i > 0 {
+					fmt.Printf("%s,\n", pad(ind+3*indInc))
+				}
+				json_print(e, fset, ind+3*indInc)
 			}
-			json_print(e, fset, ind+3*indInc)
-		}
-		fmt.Printf("%s]\n", pad(ind+2*indInc))
-		fmt.Printf("%s,\n", pad(ind+2*indInc))
-		fmt.Printf("%s\"Rhs\":\n", pad(ind+2*indInc))
-		fmt.Printf("%s[\n", pad(ind*2+indInc))
-		for i, e := range as.Rhs {
-			if i > 0 {
-				fmt.Printf("%s,\n", pad(ind+3*indInc))
+			fmt.Printf("%s]\n", pad(ind+2*indInc))
+			fmt.Printf("%s,\n", pad(ind+2*indInc))
+			fmt.Printf("%s\"Rhs\":\n", pad(ind+2*indInc))
+			fmt.Printf("%s[\n", pad(ind+2+indInc))
+			for i, e := range as.Rhs {
+				if i > 0 {
+					fmt.Printf("%s,\n", pad(ind+3*indInc))
+				}
+				json_print(e, fset, ind+3*indInc)
 			}
-			json_print(e, fset, ind+3*indInc)
+			fmt.Printf("%s]\n", pad(ind+2*indInc))
+			fmt.Printf("%s}\n", pad(ind+indInc))
 		}
-		fmt.Printf("%s]\n", pad(ind+2*indInc))
-		fmt.Printf("%s}\n", pad(ind+indInc))
 		fmt.Printf("%s]\n", pad(ind))
 	case *ast.DeclStmt:
 		fmt.Printf("%s[\n", pad(ind))
@@ -386,6 +398,39 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 			fmt.Printf("%s\"Else\":\n", pad(ind+2*indInc))
 			json_print(is.Else, fset, ind+2*indInc)
 		}
+		fmt.Printf("%s}\n", pad(ind+indInc))
+		fmt.Printf("%s]\n", pad(ind))
+	case *ast.ForStmt:
+		fmt.Printf("%s[\n", pad(ind))
+		fmt.Printf("%s\"ForStmt\",\n", pad(ind+indInc))
+		fmt.Printf("%s{\n", pad(ind+indInc))
+		fs := node.(*ast.ForStmt)
+		pos := fset.PositionFor(fs.For, true)
+		fmt.Printf("%s\"Ln\":%d, \"Col\":%d,\n",
+			pad(ind+2*indInc), pos.Line, pos.Column)
+		fmt.Printf("%s\"Init\":\n", pad(ind+2*indInc))
+		json_print(fs.Init, fset, ind+2*indInc)
+		fmt.Printf("%s,\n", pad(ind+2*indInc))
+		fmt.Printf("%s\"Cond\":\n", pad(ind+2*indInc))
+		json_print(fs.Cond, fset, ind+2*indInc)
+		fmt.Printf("%s,\n", pad(ind+2*indInc))
+		fmt.Printf("%s\"Post\":\n", pad(ind+2*indInc))
+		json_print(fs.Post, fset, ind+2*indInc)
+		fmt.Printf("%s,\n", pad(ind+2*indInc))
+		fmt.Printf("%s\"Body\":\n", pad(ind+2*indInc))
+		block_print(*fs.Body, fset, ind+2*indInc)
+		fmt.Printf("%s}\n", pad(ind+indInc))
+		fmt.Printf("%s]\n", pad(ind))
+	case *ast.IncDecStmt:
+		fmt.Printf("%s[\n", pad(ind))
+		fmt.Printf("%s\"IncDecStmt\",\n", pad(ind+indInc))
+		fmt.Printf("%s{\n", pad(ind+indInc))
+		ids := node.(*ast.IncDecStmt)
+		pos := fset.PositionFor(ids.TokPos, true)
+		fmt.Printf("%s\"Ln\":%d, \"Col\":%d, \"Op\":\"%s\",\n",
+			pad(ind+3*indInc), pos.Line, pos.Column, ids.Tok.String())
+		fmt.Printf("%s\"X\":\n", pad(ind+2*indInc))
+		json_print(ids.X, fset, ind+2*indInc)
 		fmt.Printf("%s}\n", pad(ind+indInc))
 		fmt.Printf("%s]\n", pad(ind))
 	}

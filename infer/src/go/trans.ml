@@ -6,7 +6,12 @@ let line_loc_mk_src source_file l = { Location.line = l; col = -1; file = source
 
 let line_loc_mk_proc proc_desc l = line_loc_mk_src (Procdesc.get_attributes proc_desc).translation_unit l
 
-let get_binop (str: string) =
+let get_binop_kind (typ : Typ.t option) =
+  match typ with
+    | Some (t) -> Typ.get_ikind_opt t
+    | None -> raise (Failure "Requested typed binop does not specify type kind")
+
+let get_binop ?typ (str: string) =
   match str with
     | "==" -> Binop.Eq, true
     | ">=" -> Binop.Ge, true
@@ -14,6 +19,15 @@ let get_binop (str: string) =
     | "<=" -> Binop.Le, true
     | "<"  -> Binop.Lt, true
     | "!=" -> Binop.Ne, true
+    | "+"  -> Binop.PlusA(get_binop_kind typ), false
+    | "-"  -> Binop.MinusA(get_binop_kind typ), false
+    | "*"  -> Binop.Mult(get_binop_kind typ), false
+    | "/" -> Binop.Div, false 
+
+let typ_desc_to_kind = function
+  | Typ.Tint (kind) ->
+    match kind with 
+      | Typ.IInt -> "INT"
 
 let create_node (context: Context.t) instructions loc kind =
   context.node_count <- context.node_count + 1; Procdesc.create_node context.proc_desc loc kind instructions
@@ -35,18 +49,27 @@ and trans_param = function
       (Mangled.from_string (List.nth_exn field.names 0).id,  trans_type field.t)
     )
 
-and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t * Typ.t) = 
-  let trans_var name line =
+and trans_lit context kind value =
+  (match kind with
+    | "INT" -> 
+      [], Exp.int (IntLit.of_int (int_of_string value)), Typ.mk (Tint Typ.IInt) )
+
+
+
+and trans_var (context: Context.t) name line =
     let (pvar, var_type) = Context.LocalsMap.find name context.locals_map in
     let id = Ident.create_fresh Ident.knormal in
-    let load_instr = Sil.Load (id, Exp.Lvar pvar, var_type, line_loc_mk_proc context.proc_desc line) in
-      [load_instr], Exp.Var id, var_type
-  in
+    let load_instr = Sil.Load (id, Exp.Lvar
+     pvar, var_type, line_loc_mk_proc context.proc_desc line) in
+      pvar, [load_instr], Exp.Var id, var_type
+
+and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t * Typ.t) = 
     match ex with
       | `Ident (ident) ->       
         (match ident.id with 
           | "nil" -> [], Exp.null, Typ.mk (Typ.Tptr ((Typ.mk (Tint Typ.IInt)), Typ.Pk_pointer))
-          | _ -> trans_var ident.id ident.ln)
+          | _ -> let _, instr, value, typ = trans_var context ident.id ident.ln in 
+              instr, value, typ)
       | `StarExpr (expr) -> 
         let load_ptr_list, ptr_var, ptr_var_type = trans_exp context expr.x in
         let var_type = Typ.strip_ptr ptr_var_type in
@@ -68,9 +91,7 @@ and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t *
           else (raise (Failure "Should not happen"))
 
       | `BasicLit (lit) ->
-        (match lit.kind with
-          | "INT" -> 
-            [], Exp.int (IntLit.of_int (int_of_string lit.value)), Typ.mk (Tint Typ.IInt) )
+        trans_lit context lit.kind lit.value
       | `CallExpr (expr) ->
         let call_proc_desc = 
           (match expr.fn with
@@ -155,41 +176,82 @@ and trans_assign_stmt (context : Context.t) stmt =
 
   )
 
-and trans_if_stmt (context : Context.t) stmt =
-  let cond_instr, cond_val, _ = trans_exp context stmt.cond in
+(* used for translating both if and for statements *)
+and trans_cond context cond body ?post line =
+  let cond_instr, cond_val, _ = trans_exp context cond in
   let not_cond_val = Exp.UnOp (Unop.LNot, cond_val, None) in
-  let loc = line_loc_mk_proc context.proc_desc stmt.ln in
+  let loc = line_loc_mk_proc context.proc_desc line in
   let prune_instr_true = Sil.Prune (cond_val, loc, true, Sil.Ik_if) in
   let prune_instr_false = Sil.Prune (not_cond_val, loc, false, Sil.Ik_if) in
   let node_kind_true = Procdesc.Node.Prune_node (true, Sil.Ik_if, "method_body") in
   let node_kind_false = Procdesc.Node.Prune_node (false, Sil.Ik_if, "method_body") in
-  let pred_node_id = context.node_count - 1 in
+  let if_node_id = context.node_count - 1 in (* node preceding prune nudes *)
   let prune_node_true = create_node context (cond_instr @ [prune_instr_true]) loc node_kind_true in
-  let body_nodes = trans_body context stmt.body in
+  let main_body_nodes = trans_body context body in
+  let post_node = 
+    match post with
+      | None -> []
+      | Some (s) -> trans_stmt context s (* add post iteration statement for for loops if present *)
+  in
   let last_body_node_id = context.node_count - 1 in
   let prune_node_false = create_node context (cond_instr @ [prune_instr_false]) loc node_kind_false in
   let prune_node_false_id = context.node_count - 1 in
-  let next_node_id = context.node_count in
-  let link_last_branch_node last_node_id =
+    if_node_id, prune_node_false_id, last_body_node_id, prune_node_true :: main_body_nodes @ post_node @ [prune_node_false]
+
+
+and trans_if_stmt (context : Context.t) (stmt: if_stmt_type) =
+  let if_node_id, prune_node_false_id, last_body_node_id, body_nodes = 
+    trans_cond context stmt.cond stmt.body stmt.ln
+  in
+  let link_last_branch_node last_cond_node_id =
     (* link the last node of a branch with if statement's continuation unless the this node represents a return *)
-    match Context.BranchesMap.find_opt last_node_id context.goto_branches with 
-      | None -> context.goto_branches <- Context.BranchesMap.add last_node_id (Context.Index next_node_id) context.goto_branches
+    match Context.BranchesMap.find_opt last_cond_node_id context.goto_branches with 
+      | None -> context.goto_branches <- Context.BranchesMap.add last_cond_node_id (Context.Index context.node_count) context.goto_branches
       | Some (target) -> match target with | Context.Exit -> () | Context.Index (_) -> raise (Failure "Index jump instead of expected exit jump") in
 
     (* link previous node with the false prune node - connection with true prune node will be done by falling through *)
-    context.if_branches <- Context.BranchesMap.add pred_node_id (Context.Index prune_node_false_id) context.if_branches;
+    context.if_branches <- Context.BranchesMap.add if_node_id (Context.Index prune_node_false_id) context.if_branches;
     (* link the last node of the true branch with if statement's continuation if necessary *)
     link_last_branch_node last_body_node_id;
     match stmt.el with
       | None ->
         (* return the list of nodes - all connections are already made *)
-        prune_node_true :: body_nodes @ [prune_node_false]
+        body_nodes
       | Some (el) ->
         (* compute else nodes and link the last node of the false branch with if statement's continuation if necessary *)
         let else_nodes = trans_stmt context el in
         let last_else_node_id = context.node_count - 1 in      
         link_last_branch_node last_else_node_id;
-        prune_node_true :: body_nodes @ [prune_node_false] @ else_nodes;
+        body_nodes @ else_nodes;
+
+
+and trans_for_stmt context stmt =
+  let init_nodes = trans_stmt context stmt.init in
+  let join_node_kind = Procdesc.Node.Join_node in
+  let loc = line_loc_mk_proc context.proc_desc stmt.ln in
+  let join_node = create_node context [] loc join_node_kind in
+  let if_node_id, prune_node_false_id, last_body_node_id, body_nodes = 
+    trans_cond context stmt.cond stmt.body ~post:stmt.post stmt.ln
+  in
+    (* link previous node with the false prune node - connection with true prune node will be done by falling through *)
+    context.if_branches <- Context.BranchesMap.add if_node_id (Context.Index prune_node_false_id) context.if_branches;
+    context.goto_branches <- Context.BranchesMap.add last_body_node_id (Context.Index if_node_id) context.goto_branches;
+    init_nodes @ [join_node] @ body_nodes
+
+
+
+and trans_inc_dec_stmt (context: Context.t) stmt =
+  (* translate into "regular" two-argument assignment similarly to other languges *)
+  match stmt.x with
+    | `Ident (ident) -> (* must be a variable *)
+      let lhs_pvar, lhs_instr, lhs_val, lhs_type = trans_var context ident.id stmt.ln in
+      let _, inc_val, _ = trans_lit context (typ_desc_to_kind lhs_type.desc) "1" in
+      let loc = line_loc_mk_proc context.proc_desc stmt.ln in
+      let binop_op = match stmt.op with | "++" -> "+" | "--" -> "-" in
+      let binop, _= get_binop ~typ:lhs_type binop_op in
+      let binop_expr = Exp.BinOp (binop, lhs_val, inc_val) in
+      let assign_instr = Sil.Store (Exp.Lvar lhs_pvar, lhs_type, binop_expr, loc) in
+        [create_node_method context (lhs_instr @ [assign_instr]) loc]
 
 
 and trans_stmt context = function
@@ -198,6 +260,8 @@ and trans_stmt context = function
   | `AssignStmt (stmt) -> trans_assign_stmt context stmt
   | `BlockStmt (stmt) -> trans_body context stmt
   | `IfStmt (stmt) -> trans_if_stmt context stmt
+  | `ForStmt (stmt) -> trans_for_stmt context stmt
+  | `IncDecStmt (stmt) -> trans_inc_dec_stmt context stmt
 
 and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
   if ((List.length spec.names > 1) || (List.length spec.values > 1)) then raise (Failure "Only single variable declaration supported for now") else (
@@ -283,7 +347,6 @@ and trans_func_decl (go_cfg : Context.gocfg) decl =
       go_cfg.func_decls <- Context.FuncDeclsMap.add decl.uid proc_desc go_cfg.func_decls;
       Procdesc.set_start_node proc_desc start_node;
       Procdesc.set_exit_node proc_desc exit_node;
-(*)      Procdesc.node_set_succs_exn proc_desc start_node exit_nodes exit_nodes;*)
       add_edges context (Array.of_list ((start_node :: func_nodes) @ exit_nodes)) exit_nodes;
       Procdesc.append_locals proc_desc (List.rev context.locals_list);
       ()

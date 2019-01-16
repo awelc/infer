@@ -4,7 +4,9 @@ type object_type =
 	| Field of field_type	
 	| FieldRef of int
 	| ValueSpec of value_spec_type
-	| ValueSpecRef of int ]
+	| ValueSpecRef of int 
+	| AssignStmt of assign_stmt_type
+	| AssignStmtRef of int ]
 
 type ident_type = {
 	ln <json name="Ln"> : int;
@@ -107,7 +109,9 @@ type stmt_type =
 	| ReturnStmt of return_stmt_type 
 	| AssignStmt of assign_stmt_type
 	| BlockStmt of block_stmt_type
-	| IfStmt of if_stmt_type ]
+	| IfStmt of if_stmt_type 
+	| ForStmt of for_stmt_type 
+	| IncDecStmt of inc_dec_stmt_type ]
 
 type field_type = {
 	uid <json name="Uid"> : int;
@@ -142,6 +146,22 @@ type if_stmt_type = {
 	cond <json name="Cond"> : expr_type;
 	body <json name="Body"> : block_stmt_type;
 	?el <json name="Else"> : stmt_type option;
+}
+
+type for_stmt_type = {
+	ln <json name="Ln"> : int;
+	col <json name="Col"> : int;
+	init <json name="Init"> : stmt_type;
+	cond <json name="Cond"> : expr_type;
+	post <json name="Post"> : stmt_type;
+	body <json name="Body"> : block_stmt_type;
+}
+
+type inc_dec_stmt_type = {
+	ln <json name="Ln"> : int;
+	col <json name="Col"> : int;
+	op <json name="Op"> : string;
+	x <json name="X"> : expr_type;	
 }
 
 type file_type = {

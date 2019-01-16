@@ -42,3 +42,16 @@ func baz(a int) int {
 		return *p2
 	}
 }
+
+func bak() int {
+	var i int = 42
+	var p *int = nil
+
+	if i == 42 {
+		return i
+	} else {
+		return 7
+		var a int = *p // surprisingly, this is legal (no error)
+		return a
+	}
+}
