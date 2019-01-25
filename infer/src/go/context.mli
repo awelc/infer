@@ -2,13 +2,7 @@
 
 module LocalsMap : Caml.Map.S with type key = string
 
-module IntMap : Caml.Map.S with type key = int
-
 module FuncDeclsMap : Caml.Map.S with type key = int
-
-module BranchesMap : Caml.Map.S with type key = int
-
-type jump_kind = Index of int | Exit
 
 type gocfg = 
 	{ cfg: Cfg.t
@@ -19,11 +13,10 @@ type t =
 	{ proc_desc: Procdesc.t
  	; mutable locals_map : (Pvar.t * Typ.t) LocalsMap.t
 	; mutable locals_list : ProcAttributes.var_data list
-	; mutable if_branches : jump_kind BranchesMap.t
-	; mutable goto_branches : jump_kind BranchesMap.t
-	; mutable node_count: int
+	; mutable break_goto_nodes : Procdesc.Node.t list (* nodes connected with  the next one after the loop in CFG *)
+	; exit_node : Procdesc.Node.t
 	; go_cfg : gocfg } 
 
-val create_context : Procdesc.t -> gocfg -> t
+val create_context : Procdesc.t -> gocfg -> Procdesc.Node.t -> t
 
 val create_cfg : SourceFile.t -> gocfg
