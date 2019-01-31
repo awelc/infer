@@ -2,7 +2,11 @@
 
 module LocalsMap : Caml.Map.S with type key = string
 
+module IntMap : Caml.Map.S with type key = int
+
 module FuncDeclsMap : Caml.Map.S with type key = int
+
+module LabeledStmtsMap : Caml.Map.S with type key = int
 
 type gocfg = 
 	{ cfg: Cfg.t
@@ -13,7 +17,9 @@ type t =
 	{ proc_desc: Procdesc.t
  	; mutable locals_map : (Pvar.t * Typ.t) LocalsMap.t
 	; mutable locals_list : ProcAttributes.var_data list
-	; mutable break_goto_nodes : Procdesc.Node.t list (* nodes connected with  the next one after the loop in CFG *)
+	; mutable labeled_stmts: (Procdesc.Node.t * Procdesc.Node.t * Procdesc.Node.t list) LabeledStmtsMap.t
+	; mutable break_nodes : Procdesc.Node.t list (* nodes representing a break to immediately enclosing statement *)
+	; mutable cont_nodes : Procdesc.Node.t list (* nodes representing a break to immediately enclosing statement *)
 	; exit_node : Procdesc.Node.t
 	; go_cfg : gocfg } 
 

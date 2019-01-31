@@ -2,6 +2,7 @@ open! IStd
 open Go_ast_to_json_t
 
 let funcs_map = Int.Table.create () ~size:8
+let labeled_stmts_map = Int.Table.create () ~size:8
 
 let concatmap sep fn l =  String.concat ~sep:(sep) (List.map ~f:(fn) l)
 
@@ -43,6 +44,10 @@ and pretty_ident ident =
         | `FuncDecl (decl) -> 
           let s = pretty_func_decl decl in
             Hashtbl.replace funcs_map ~key:decl.uid ~data:s;
+            ident.id
+        | `LabeledStmt (stmt) -> 
+          let s = pretty_labeled_stmt stmt in
+            Hashtbl.replace labeled_stmts_map ~key:stmt.uid ~data:s;
             ident.id
         | _ -> ident.id
 
@@ -101,6 +106,21 @@ and pretty_for_stmt stmt =
 and pretty_inc_dec_stmt stmt =
   pretty_expr stmt.x ^ stmt.op
 
+and pretty_branch_stmt stmt =
+  stmt.keyword ^ " " ^ 
+  match stmt.label with
+    | None -> ""
+    | Some (l) -> pretty_ident l
+
+and pretty_labeled_stmt stmt =
+  pretty_ident stmt.label ^ ":\n" ^ pretty_stmt stmt.stmt
+
+and pretty_labeled_stmt_ref ref =
+      (match Hashtbl.find labeled_stmts_map ref with
+        | None -> raise (Failure "Should not happen")
+        | Some (s) -> s )
+
+  
 and pretty_stmt = function
   | `DeclStmt (stmt) -> pretty_decl_stmt stmt
   | `ReturnStmt (stmt) -> pretty_return_stmt stmt
@@ -109,6 +129,9 @@ and pretty_stmt = function
   | `IfStmt (stmt) -> pretty_if_stmt stmt
   | `ForStmt (stmt) -> pretty_for_stmt stmt
   | `IncDecStmt (stmt) -> pretty_inc_dec_stmt stmt
+  | `BranchStmt (stmt) -> pretty_branch_stmt stmt
+  | `LabeledStmt (stmt) -> pretty_labeled_stmt stmt
+  | `LabeledStmtRef (ref) -> pretty_labeled_stmt_ref ref
 
 and pretty_stmt_type body =
   concatmap "\n" pretty_stmt body.stmts

@@ -17,11 +17,13 @@ var field_count int64 = 0
 var func_decl_count int64 = 0
 var value_spec_count int64 = 0
 var assign_stmt_count int64 = 0
+var labeled_stmt_count int64 = 0
 
 var fields map[*ast.Field]int64 = make(map[*ast.Field]int64)
 var func_decls map[*ast.FuncDecl]int64 = make(map[*ast.FuncDecl]int64)
 var value_specs map[*ast.ValueSpec]int64 = make(map[*ast.ValueSpec]int64)
 var assign_stmts map[*ast.AssignStmt]int64 = make(map[*ast.AssignStmt]int64)
+var labeled_stmts map[*ast.LabeledStmt]int64 = make(map[*ast.LabeledStmt]int64)
 
 func main() {
 	args := os.Args
@@ -52,6 +54,8 @@ func obj_print(obj ast.Object, fset token.FileSet, ind int) {
 	case *ast.ValueSpec:
 		json_print(n, fset, ind+indInc)
 	case *ast.AssignStmt:
+		json_print(n, fset, ind+indInc)
+	case *ast.LabeledStmt:
 		json_print(n, fset, ind+indInc)
 	default:
 		log.Fatal("Unsupported ast object type (for now)")
@@ -291,8 +295,8 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 			assign_stmts[as] = assign_stmt_uid
 			assign_stmt_count++
 			pos := fset.PositionFor(as.TokPos, true)
-			fmt.Printf("%s\"Ln\":%d, \"Col\":%d,\n",
-				pad(ind+2*indInc), pos.Line, pos.Column)
+			fmt.Printf("%s\"Uid\":%d, \"Ln\":%d, \"Col\":%d,\n",
+				pad(ind+2*indInc), assign_stmt_uid, pos.Line, pos.Column)
 			fmt.Printf("%s\"Lhs\":\n", pad(ind+2*indInc))
 			fmt.Printf("%s[\n", pad(ind+2+indInc))
 			for i, e := range as.Lhs {
@@ -432,6 +436,44 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 		fmt.Printf("%s\"X\":\n", pad(ind+2*indInc))
 		json_print(ids.X, fset, ind+2*indInc)
 		fmt.Printf("%s}\n", pad(ind+indInc))
+		fmt.Printf("%s]\n", pad(ind))
+	case *ast.BranchStmt:
+		fmt.Printf("%s[\n", pad(ind))
+		fmt.Printf("%s\"BranchStmt\",\n", pad(ind+indInc))
+		fmt.Printf("%s{\n", pad(ind+indInc))
+		bs := node.(*ast.BranchStmt)
+		pos := fset.PositionFor(bs.TokPos, true)
+		fmt.Printf("%s\"Ln\":%d, \"Col\":%d, \"Keyword\":\"%s\"\n",
+			pad(ind+2*indInc), pos.Line, pos.Column, bs.Tok.String())
+		if bs.Label != nil {
+			fmt.Printf("%s,\n", pad(ind+indInc))
+			fmt.Printf("%s\"Label\":\n", pad(ind+2*indInc))
+			ident_print(*bs.Label, fset, ind+2*indInc)
+		}
+		fmt.Printf("%s}\n", pad(ind+indInc))
+		fmt.Printf("%s]\n", pad(ind))
+	case *ast.LabeledStmt:
+		fmt.Printf("%s[\n", pad(ind))
+		ls := node.(*ast.LabeledStmt)
+		uid, found := labeled_stmts[ls]
+		if found {
+			fmt.Printf("%s\"LabeledStmtRef\", %d\n", pad(ind+indInc), uid)
+		} else {
+			fmt.Printf("%s\"LabeledStmt\",\n", pad(ind+indInc))
+			fmt.Printf("%s{\n", pad(ind+indInc))
+			labeled_stmt_uid := labeled_stmt_count
+			labeled_stmts[ls] = labeled_stmt_uid
+			labeled_stmt_count++
+			pos := fset.PositionFor(ls.Colon, true)
+			fmt.Printf("%s\"Uid\":%d, \"Ln\":%d, \"Col\":%d,\n",
+				pad(ind+2*indInc), labeled_stmt_uid, pos.Line, pos.Column)
+			fmt.Printf("%s\"Label\":\n", pad(ind+2*indInc))
+			ident_print(*ls.Label, fset, ind+2*indInc)
+			fmt.Printf("%s,\n", pad(ind+2*indInc))
+			fmt.Printf("%s\"Stmt\":\n", pad(ind+2*indInc))
+			json_print(ls.Stmt, fset, ind+2*indInc)
+			fmt.Printf("%s}\n", pad(ind+indInc))
+		}
 		fmt.Printf("%s]\n", pad(ind))
 	}
 

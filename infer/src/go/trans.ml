@@ -36,7 +36,7 @@ let create_node_method proc_desc instructions loc =
   create_node proc_desc instructions loc (Procdesc.Node.Stmt_node MethodBody)
 
 let rec create_fn_desc (go_cfg : Context.gocfg) = function
-  | `FuncDecl (decl) -> trans_func_decl go_cfg decl
+  | `FuncDecl (decl) -> ignore (trans_func_decl go_cfg decl)
   | `FuncDeclRef (ref) -> if (not(Context.FuncDeclsMap.mem ref go_cfg.func_decls)) then raise (Failure "Function definition not found")
   | `GenDecl (decl) -> raise (Failure "Should not happen")
 
@@ -53,8 +53,6 @@ and trans_lit context kind value =
   (match kind with
     | "INT" -> 
       [], Exp.int (IntLit.of_int (int_of_string value)), Typ.mk (Tint Typ.IInt) )
-
-
 
 and trans_var (context: Context.t) name line =
     let (pvar, var_type) = Context.LocalsMap.find name context.locals_map in
@@ -93,17 +91,17 @@ and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t *
       | `BasicLit (lit) ->
         trans_lit context lit.kind lit.value
       | `CallExpr (expr) ->
-        let call_proc_desc = 
-          (match expr.fn with
+        let call_proc_desc = (
+          match expr.fn with
             | `Ident (ident) -> 
                 match ident.obj with
-                  | Some (o) ->
-                    let func_uid = 
-                      (match o with
-                        | `FuncDecl (decl) -> trans_func_decl context.go_cfg decl; decl.uid
-                        | `FuncDeclRef (ref) -> ref)
-                    in 
-                      Context.FuncDeclsMap.find func_uid context.go_cfg.func_decls)
+                  | None -> raise (Failure "Call expression must point to a function declaration")
+                  | Some (o) -> (
+                      match o with
+                        | `FuncDecl (decl) -> trans_func_decl context.go_cfg decl
+                        | `FuncDeclRef (ref) -> Context.FuncDeclsMap.find ref context.go_cfg.func_decls
+                    )
+        )
         in
         let instrs, call_args =
           List.fold
@@ -132,6 +130,24 @@ and trans_type = function
   | `BasicLit (list) -> raise (Failure "Should not happen")
   | `CallExpr (expr) -> raise (Failure "Should not happen")
 
+(* connect previous nodes with the next node, unless  this next node is a break/continue node,
+   in which case record appropriate meta date to support break/continue;
+    return true if connecting with the next node, false otherwise *)
+and connect_with_next_node (context: Context.t) nodes_to_next next_node =
+  let break_node_name = Typ.Procname.Go (Typ.Procname.Go.make "42_break") in
+  let cont_node_name = Typ.Procname.Go (Typ.Procname.Go.make "42_continue") in
+  if (Typ.Procname.equal (Procdesc.Node.get_proc_name next_node) break_node_name) then (
+      (* if freshly evaluated statement is "break", skip the node and redirect previous nodes to the end of the loop via break_nodes list *)
+      context.break_nodes <- context.break_nodes @ nodes_to_next; false
+  ) else if (Typ.Procname.equal (Procdesc.Node.get_proc_name next_node) cont_node_name) then (
+      (* if freshly evaluated statement is "continue", skip the node and redirect previous nodes to the beginning of the loop via cont_nodes list *)
+      context.cont_nodes <- context.cont_nodes @ nodes_to_next; false
+  ) else (
+      (* connect all previous nodes with the first node of the freshly evaluated statement *)          
+      List.iter ~f:(fun (n) -> Procdesc.node_set_succs_exn context.proc_desc n [next_node] [context.exit_node]) nodes_to_next; true
+  )
+
+
 and trans_body (context: Context.t) body : (Procdesc.Node.t * Procdesc.Node.t * Procdesc.Node.t list) =
   (* translate first statement *)
   let first_node, last_node, nodes_to_next = trans_stmt context (List.hd_exn body.stmts) in
@@ -140,8 +156,14 @@ and trans_body (context: Context.t) body : (Procdesc.Node.t * Procdesc.Node.t * 
       | [] -> first_node, prev_last_node, prev_nodes_to_next
       | stmt :: tail -> 
         let new_first_node, new_last_node, new_nodes_to_next = trans_stmt context stmt in
-          List.iter ~f:(fun (n) -> Procdesc.node_set_succs_exn context.proc_desc n [new_first_node] [context.exit_node]) prev_nodes_to_next;
-          trans_body_rec new_last_node new_nodes_to_next tail)
+          if (connect_with_next_node context prev_nodes_to_next new_first_node) then (
+              (* new_first_node is a "regular" node *)
+              trans_body_rec new_last_node new_nodes_to_next tail
+          ) else (
+              (* new_first_node is a break/contunue node *)
+              trans_body_rec new_last_node [] tail
+          )
+    )
   in
     (* recursively translate all other statements linkig their nodes together *)
     trans_body_rec last_node nodes_to_next (List.tl_exn body.stmts)
@@ -190,7 +212,7 @@ and trans_assign_stmt (context : Context.t) stmt =
   )
 
 (* used for translating both if and for statements *)
-and trans_cond context cond body ?post line =
+and trans_cond context cond body line =
   let cond_instr, cond_val, _ = trans_exp context cond in
   let proc_desc = context.proc_desc in
   let loc = line_loc_mk_proc proc_desc line in
@@ -201,27 +223,14 @@ and trans_cond context cond body ?post line =
   let node_kind_true = Procdesc.Node.Prune_node (true, Sil.Ik_if, "method_body") in
   let node_kind_false = Procdesc.Node.Prune_node (false, Sil.Ik_if, "method_body") in
   let prune_node_true = create_node proc_desc [prune_instr_true] loc node_kind_true in
-  (* nodes in the true_branch to be connected with the one following conditional *)
-  let branch_first_node, branch_last_node, branch_nodes_to_next = trans_body context body in 
-  let last_true_node, true_nodes_to_next = 
-    match post with
-      | None -> branch_last_node, branch_nodes_to_next
-      | Some (s) -> (* add post iteration statement for for loops if present *)
-        let post_first_node, post_last_node, post_nodes_to_next = trans_stmt context s in
-        let dummy_node = Procdesc.Node.dummy (Procdesc.get_proc_name proc_desc) in
-          if (Procdesc.Node.equal post_last_node dummy_node) then (
-            raise (Failure "Converted post statement of the for loop should have a single last node")
-          ) else (
-            List.iter ~f:(fun (n) -> Procdesc.node_set_succs_exn proc_desc n [post_first_node] [context.exit_node]) branch_nodes_to_next;
-            post_last_node, post_nodes_to_next
-          )
-  in
+  (* create nodes in the true_branch *)
+  let true_first_node, true_last_node, true_nodes_to_next = trans_body context body in 
   let prune_node_false = create_node proc_desc (cond_instr @ [prune_instr_false]) loc node_kind_false in
     (* connect prune node of the true branch with the first node of this branch *)
-    Procdesc.node_set_succs_exn proc_desc prune_node_true [branch_first_node] [context.exit_node];
-    (* link split node with the false and true prune nodes *)
+    ignore (connect_with_next_node context [prune_node_true] true_first_node); 
+    (* link split node with the false and true prune nodes - we know all nodes so regular node_set_succs_exn can be used *)
     Procdesc.node_set_succs_exn proc_desc split_node [prune_node_true; prune_node_false] [context.exit_node];
-    split_node, prune_node_false, last_true_node, true_nodes_to_next
+    split_node, prune_node_false, true_last_node, true_nodes_to_next
 
 
 and trans_if_stmt (context : Context.t) (stmt: if_stmt_type) =
@@ -236,7 +245,7 @@ and trans_if_stmt (context : Context.t) (stmt: if_stmt_type) =
         (* compute else nodes and link the last node of the false branch with if statement's continuation if necessary *)
         let false_first_node, false_last_node, false_nodes_to_next = trans_stmt context el in
           (* connect prune node of the false branch with the first node of this branch *)
-          Procdesc.node_set_succs_exn context.proc_desc prune_node_false [false_first_node] [context.exit_node];
+          ignore (connect_with_next_node context [prune_node_false] false_first_node);
           split_node, last_node, false_nodes_to_next @ true_nodes_to_next
 
 
@@ -245,14 +254,33 @@ and trans_for_stmt (context: Context.t) stmt =
   let last_node = Procdesc.Node.dummy (Procdesc.get_proc_name proc_desc) in (* for statement does not really has a single last node *)
   let init_first_node, _, init_nodes_to_next = trans_stmt context stmt.init in
   let loc = line_loc_mk_proc context.proc_desc stmt.ln in
-  let split_node, prune_node_false, last_true_node, _ =
-    trans_cond context stmt.cond stmt.body ~post:stmt.post stmt.ln
+  let prev_break_nodes = context.break_nodes in
+  let prev_cont_nodes = context.cont_nodes in
+  let split_node, prune_node_false, _, true_nodes_to_next =
+    (* break_nodes and cont_nodes should only reflect nodes in the body of the current loop *)
+    context.break_nodes <- []; context.cont_nodes <- [];
+    trans_cond context stmt.cond stmt.body stmt.ln
   in
-    (* connect nodes of the for init statement to the first node of the conditional *)
-    List.iter ~f:(fun (n) ->  Procdesc.node_set_succs_exn proc_desc n [split_node] [context.exit_node]) init_nodes_to_next;
+  let post_first_node, post_last_node, post_nodes_to_next = trans_stmt context stmt.post in
+  let dummy_node = Procdesc.Node.dummy (Procdesc.get_proc_name proc_desc) in
+    (* connect lat node of the for loop's body with the for loop'd post statement *)
+    if (Procdesc.Node.equal post_last_node dummy_node) then (
+      (* this exception would fire if the last node belongs to if statement, for statement, or break statement,
+         all of which should be illegal  *)
+      raise (Failure "Converted post statement of the for loop should have a single last valid node")
+    ) else (
+      ignore (connect_with_next_node context true_nodes_to_next post_first_node);
+    );
+    (* connect nodes of the for init statement to the node starting the conditional *)
+    ignore (connect_with_next_node context init_nodes_to_next split_node);
     (* connect the last node of the loop with the node starting the conditional *)
-    Procdesc.node_set_succs_exn proc_desc last_true_node [split_node] [context.exit_node];
-    init_first_node, last_node, [prune_node_false]
+    ignore (connect_with_next_node context [post_last_node] split_node);
+    (* connect continue nodes to the node starting the first node of the for loop's post statement *)
+    ignore (connect_with_next_node context context.cont_nodes post_first_node);
+    let new_nodes_to_next = [prune_node_false] @ context.break_nodes in
+      context.break_nodes <- prev_break_nodes;
+      context.cont_nodes <- prev_cont_nodes;      
+      init_first_node, last_node, new_nodes_to_next
 
 
 and trans_inc_dec_stmt (context: Context.t) stmt =
@@ -270,6 +298,54 @@ and trans_inc_dec_stmt (context: Context.t) stmt =
       let n = create_node_method proc_desc (lhs_instr @ [assign_instr]) loc in
         n, n, [n]
 
+and trans_branch_stmt (context: Context.t) (stmt: branch_stmt_type) =
+  let proc_desc = context.proc_desc in
+  let loc = line_loc_mk_proc context.proc_desc stmt.ln in
+  let dummy_node = Procdesc.Node.dummy (Procdesc.get_proc_name proc_desc) in
+    match stmt.label with
+      | None -> (
+        let node_name = 
+          (match stmt.keyword with
+            | "break" -> Typ.Procname.Go (Typ.Procname.Go.make "42_break")
+            | "continue" -> Typ.Procname.Go (Typ.Procname.Go.make "42_continue")) 
+        in
+        let n = Procdesc.Node.dummy node_name in
+          (* label-less break and continue statements do not actually produce a "real" CFG node;
+             the first node (with "illegal" function name is used as a mearker for appropriate node linking,
+             and the last node shouldn't be used at all 
+             (using dummy node with a fake "illegal" function name is a workaround to avoid this node being inserted into CFG) *)
+          n, dummy_node, [] 
+      )
+      | Some (l) -> (
+        let first_node, _, _ =
+          match l.obj with
+            | None -> raise (Failure "Branch label must point to a statement")
+            | Some (o) -> (
+              match o with
+                | `LabeledStmt (s) -> trans_labeled_stmt context s
+                | `LabeledStmtRef (ref) -> trans_labeled_stmt_ref context ref
+            )
+        in
+          match stmt.keyword with
+            | "goto" -> 
+              (* have previous nodes link with the first node of the labeled statement *)
+              first_node, dummy_node, []
+      )
+
+
+and trans_labeled_stmt (context: Context.t) stmt =
+  let loc = line_loc_mk_proc context.proc_desc stmt.ln in
+  let proc_desc = context.proc_desc in
+  let skip_node = create_node proc_desc [] loc (Procdesc.Node.Skip_node ("goto:" ^ stmt.label.id)) in
+  let first_node, last_node, nodes_to_next = trans_stmt context stmt.stmt in
+    (* connect skip node identifying the label with actual statement node *)
+    Procdesc.node_set_succs_exn proc_desc skip_node [first_node] [context.exit_node];
+    context.labeled_stmts <- Context.LabeledStmtsMap.add stmt.uid (skip_node, last_node, nodes_to_next) context.labeled_stmts;    
+    skip_node, last_node, nodes_to_next
+
+and trans_labeled_stmt_ref (context: Context.t) ref =
+  Context.LabeledStmtsMap.find ref context.labeled_stmts
+
 and trans_stmt context = function
   | `DeclStmt (stmt) -> trans_decl_stmt context stmt
   | `ReturnStmt (stmt) -> trans_return_stmt context stmt
@@ -278,6 +354,9 @@ and trans_stmt context = function
   | `IfStmt (stmt) -> trans_if_stmt context stmt
   | `ForStmt (stmt) -> trans_for_stmt context stmt
   | `IncDecStmt (stmt) -> trans_inc_dec_stmt context stmt
+  | `BranchStmt (stmt) -> trans_branch_stmt context stmt
+  | `LabeledStmt (stmt) -> trans_labeled_stmt context stmt
+  | `LabeledStmtRef (ref) -> trans_labeled_stmt_ref context ref
 
 and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
   if ((List.length spec.names > 1) || (List.length spec.values > 1)) then raise (Failure "Only single variable declaration supported for now") else (
@@ -309,7 +388,7 @@ and trans_gen_decl context decl =
       | "var" -> trans_spec context decl.ln (List.nth_exn decl.specs 0)
   )
 
-and trans_func_decl (go_cfg : Context.gocfg) decl =
+and trans_func_decl (go_cfg : Context.gocfg) decl : Procdesc.t =
   let func_type = decl.func_type in
   if (List.length func_type.results > 1) then raise (Failure "Only one result value supported for now") else (
     let source_file = go_cfg.src_file in
@@ -344,7 +423,7 @@ and trans_func_decl (go_cfg : Context.gocfg) decl =
       Procdesc.set_start_node proc_desc start_node;
       Procdesc.set_exit_node proc_desc exit_node;
       Procdesc.append_locals proc_desc (List.rev context.locals_list);
-      ()
+      proc_desc
   )
 
 and trans_decl context = function

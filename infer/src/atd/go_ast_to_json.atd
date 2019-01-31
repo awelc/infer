@@ -6,7 +6,9 @@ type object_type =
 	| ValueSpec of value_spec_type
 	| ValueSpecRef of int 
 	| AssignStmt of assign_stmt_type
-	| AssignStmtRef of int ]
+	| AssignStmtRef of int
+	| LabeledStmt of labeled_stmt_type
+	| LabeledStmtRef of int ]
 
 type ident_type = {
 	ln <json name="Ln"> : int;
@@ -98,6 +100,7 @@ type return_stmt_type = {
 }
 
 type assign_stmt_type = {
+	uid <json name="Uid"> : int;
 	ln <json name="Ln"> : int;
 	col <json name="Col"> : int;
 	lhs <json name="Lhs"> : expr_type list;
@@ -111,7 +114,10 @@ type stmt_type =
 	| BlockStmt of block_stmt_type
 	| IfStmt of if_stmt_type 
 	| ForStmt of for_stmt_type 
-	| IncDecStmt of inc_dec_stmt_type ]
+	| IncDecStmt of inc_dec_stmt_type
+	| BranchStmt of branch_stmt_type
+	| LabeledStmt of labeled_stmt_type
+	| LabeledStmtRef of int]
 
 type field_type = {
 	uid <json name="Uid"> : int;
@@ -162,6 +168,21 @@ type inc_dec_stmt_type = {
 	col <json name="Col"> : int;
 	op <json name="Op"> : string;
 	x <json name="X"> : expr_type;	
+}
+
+type branch_stmt_type = {
+	ln <json name="Ln"> : int;
+	col <json name="Col"> : int;
+	keyword <json name="Keyword"> : string;
+	?label <json name="Label"> : ident_type option;	
+}
+
+type labeled_stmt_type = {
+	uid <json name="Uid"> : int;
+	ln <json name="Ln"> : int;
+	col <json name="Col"> : int;
+	label <json name="Label"> : ident_type;	
+	stmt <json name="Stmt"> : stmt_type;
 }
 
 type file_type = {
