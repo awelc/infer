@@ -20,6 +20,17 @@ label:
 	return *p // errror
 }
 
+func fom(i int) int {
+	var p *int = nil
+label:
+	if i == 7 {
+		i = 42
+		goto label
+		return *p // no errror
+	}
+	return 42
+}
+
 func foz() int {
 	var p *int = nil
 	for i := 0; i < 7; i++ {
@@ -78,6 +89,30 @@ func bam() int {
 			break
 		}
 		return *p // error
+	}
+	return 42
+}
+
+func moo() int {
+	var p *int = nil
+outer:
+	for i := 0; i < 7; i++ {
+		for j := 0; j < 7; j++ {
+			break outer
+		}
+		return *p // no error
+	}
+	return 42
+}
+
+func noo() int {
+	var p *int = nil
+outer:
+	for i := 0; i < 7; i++ {
+		for j := 0; j < 7; j++ {
+			continue outer
+		}
+		return *p // no error
 	}
 	return 42
 }

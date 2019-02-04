@@ -137,11 +137,14 @@ and connect_with_next_node (context: Context.t) nodes_to_next next_node =
   let break_node_name = Typ.Procname.Go (Typ.Procname.Go.make "42_break") in
   let cont_node_name = Typ.Procname.Go (Typ.Procname.Go.make "42_continue") in
   if (Typ.Procname.equal (Procdesc.Node.get_proc_name next_node) break_node_name) then (
-      (* if freshly evaluated statement is "break", skip the node and redirect previous nodes to the end of the loop via break_nodes list *)
-      context.break_nodes <- context.break_nodes @ nodes_to_next; false
+      (* if freshly evaluated statement is "break", skip the node and redirect previous nodes to the end of the loop
+          by adding the previous nodes to break_nodes list at appropriate level *)
+      let current_break_nodes = Context.NestMap.find next_node context.break_jump_targets in
+      List.iter ~f:(fun (n) -> Stack.push current_break_nodes n) nodes_to_next; false
   ) else if (Typ.Procname.equal (Procdesc.Node.get_proc_name next_node) cont_node_name) then (
-      (* if freshly evaluated statement is "continue", skip the node and redirect previous nodes to the beginning of the loop via cont_nodes list *)
-      context.cont_nodes <- context.cont_nodes @ nodes_to_next; false
+      (* same as above but for "continue" *)
+      let current_cont_nodes = Context.NestMap.find next_node context.cont_jump_targets in
+      List.iter ~f:(fun (n) -> Stack.push current_cont_nodes n) nodes_to_next; false      
   ) else (
       (* connect all previous nodes with the first node of the freshly evaluated statement *)          
       List.iter ~f:(fun (n) -> Procdesc.node_set_succs_exn context.proc_desc n [next_node] [context.exit_node]) nodes_to_next; true
@@ -254,11 +257,11 @@ and trans_for_stmt (context: Context.t) stmt =
   let last_node = Procdesc.Node.dummy (Procdesc.get_proc_name proc_desc) in (* for statement does not really has a single last node *)
   let init_first_node, _, init_nodes_to_next = trans_stmt context stmt.init in
   let loc = line_loc_mk_proc context.proc_desc stmt.ln in
-  let prev_break_nodes = context.break_nodes in
-  let prev_cont_nodes = context.cont_nodes in
   let split_node, prune_node_false, _, true_nodes_to_next =
     (* break_nodes and cont_nodes should only reflect nodes in the body of the current loop *)
-    context.break_nodes <- []; context.cont_nodes <- [];
+    context.break_nodes <- Stack.create () :: context.break_nodes;
+    context.cont_nodes <- Stack.create () :: context.cont_nodes;
+    context.jump_nest <- context.jump_nest + 1;
     trans_cond context stmt.cond stmt.body stmt.ln
   in
   let post_first_node, post_last_node, post_nodes_to_next = trans_stmt context stmt.post in
@@ -276,10 +279,12 @@ and trans_for_stmt (context: Context.t) stmt =
     (* connect the last node of the loop with the node starting the conditional *)
     ignore (connect_with_next_node context [post_last_node] split_node);
     (* connect continue nodes to the node starting the first node of the for loop's post statement *)
-    ignore (connect_with_next_node context context.cont_nodes post_first_node);
-    let new_nodes_to_next = [prune_node_false] @ context.break_nodes in
-      context.break_nodes <- prev_break_nodes;
-      context.cont_nodes <- prev_cont_nodes;      
+    ignore (connect_with_next_node context (Stack.fold ~f:(fun accu n -> n :: accu) ~init:[] (List.hd_exn context.cont_nodes)) post_first_node);
+    (* add all break nodes to a list of nodes to be connected with a statement following the for loop *)
+    let new_nodes_to_next = [prune_node_false] @ (Stack.fold ~f:(fun accu n -> n :: accu) ~init:[] (List.hd_exn context.break_nodes)) in
+      context.jump_nest <- context.jump_nest - 1;
+      context.break_nodes <- List.tl_exn context.break_nodes;
+      context.cont_nodes <- List.tl_exn context.cont_nodes;
       init_first_node, last_node, new_nodes_to_next
 
 
@@ -302,46 +307,78 @@ and trans_branch_stmt (context: Context.t) (stmt: branch_stmt_type) =
   let proc_desc = context.proc_desc in
   let loc = line_loc_mk_proc context.proc_desc stmt.ln in
   let dummy_node = Procdesc.Node.dummy (Procdesc.get_proc_name proc_desc) in
+  let jump_node keyword = (
+    (* this node is only used as a marker for appropriate node linking;
+       using dummy node with a fake "illegal" function name
+       is a workaround to avoid this node being inserted into CFG *)
+    let node_name = 
+      (match keyword with
+        | "break" -> 
+          Typ.Procname.Go (Typ.Procname.Go.make "42_break")
+        | "continue" ->
+          Typ.Procname.Go (Typ.Procname.Go.make "42_continue"))
+      in
+        Procdesc.Node.dummy node_name
+    ) in
     match stmt.label with
-      | None -> (
-        let node_name = 
+      | None ->
+        let j_node = jump_node stmt.keyword in
           (match stmt.keyword with
-            | "break" -> Typ.Procname.Go (Typ.Procname.Go.make "42_break")
-            | "continue" -> Typ.Procname.Go (Typ.Procname.Go.make "42_continue")) 
-        in
-        let n = Procdesc.Node.dummy node_name in
-          (* label-less break and continue statements do not actually produce a "real" CFG node;
-             the first node (with "illegal" function name is used as a mearker for appropriate node linking,
-             and the last node shouldn't be used at all 
-             (using dummy node with a fake "illegal" function name is a workaround to avoid this node being inserted into CFG) *)
-          n, dummy_node, [] 
-      )
+            | "break" -> 
+              context.break_jump_targets <- Context.NestMap.add j_node (List.hd_exn context.break_nodes) context.break_jump_targets
+            | "continue" ->
+              context.cont_jump_targets <- Context.NestMap.add j_node (List.hd_exn context.cont_nodes) context.cont_jump_targets);
+          j_node, dummy_node, [] 
       | Some (l) -> (
-        let first_node, _, _ =
+        let label_node =
           match l.obj with
             | None -> raise (Failure "Branch label must point to a statement")
             | Some (o) -> (
               match o with
-                | `LabeledStmt (s) -> trans_labeled_stmt context s
-                | `LabeledStmtRef (ref) -> trans_labeled_stmt_ref context ref
+                | `LabeledStmt (s) -> 
+                  let f, l, n = trans_labeled_stmt context s in f
+                | `LabeledStmtRef (ref) -> (
+                  match Context.LabeledStmtsMap.find_opt ref context.labeled_stmts with 
+                    | None -> Context.LabelNodesMap.find ref context.label_nodes
+                    | Some (f, l, n) -> f
+                )
+
             )
         in
-          match stmt.keyword with
-            | "goto" -> 
-              (* have previous nodes link with the first node of the labeled statement *)
-              first_node, dummy_node, []
+          let compute_jumps jump_nodes = (
+            let j_node = jump_node stmt.keyword in
+            let label_nest = Context.NestMap.find label_node context.label_jump_nests in
+            let current_jump_nodes = List.nth_exn jump_nodes ((List.length jump_nodes - 1) - label_nest) in
+              j_node, current_jump_nodes
+          ) in
+            match stmt.keyword with
+              | "goto" -> 
+                (* have previous nodes link with the first node of the labeled statement *)
+                label_node, dummy_node, []
+              | "break" ->
+                (* figure out what is the the nesting level this break node breaks into *)
+                let j_node, current_jump_nodes = compute_jumps context.break_nodes in
+                  context.break_jump_targets <- Context.NestMap.add j_node current_jump_nodes context.break_jump_targets;
+                  j_node, dummy_node, []
+              | "continue" -> 
+                (* figure out what is the the nesting level this continue node continues to *)
+                let j_node, current_jump_nodes = compute_jumps context.cont_nodes in
+                  context.cont_jump_targets <- Context.NestMap.add j_node current_jump_nodes context.cont_jump_targets;
+                  j_node, dummy_node, []
       )
 
 
 and trans_labeled_stmt (context: Context.t) stmt =
   let loc = line_loc_mk_proc context.proc_desc stmt.ln in
   let proc_desc = context.proc_desc in
-  let skip_node = create_node proc_desc [] loc (Procdesc.Node.Skip_node ("goto:" ^ stmt.label.id)) in
-  let first_node, last_node, nodes_to_next = trans_stmt context stmt.stmt in
-    (* connect skip node identifying the label with actual statement node *)
-    Procdesc.node_set_succs_exn proc_desc skip_node [first_node] [context.exit_node];
-    context.labeled_stmts <- Context.LabeledStmtsMap.add stmt.uid (skip_node, last_node, nodes_to_next) context.labeled_stmts;    
-    skip_node, last_node, nodes_to_next
+  let skip_node = create_node proc_desc [] loc (Procdesc.Node.Skip_node ("jump: " ^ stmt.label.id)) in
+    context.label_jump_nests <- Context.NestMap.add skip_node context.jump_nest context.label_jump_nests;
+    context.label_nodes <- Context.LabelNodesMap.add stmt.uid skip_node context.label_nodes;
+    let first_node, last_node, nodes_to_next = trans_stmt context stmt.stmt in
+      (* connect skip node identifying the label with actual statement node *)
+      Procdesc.node_set_succs_exn proc_desc skip_node [first_node] [context.exit_node];
+      context.labeled_stmts <- Context.LabeledStmtsMap.add stmt.uid (skip_node, last_node, nodes_to_next) context.labeled_stmts;    
+      skip_node, last_node, nodes_to_next
 
 and trans_labeled_stmt_ref (context: Context.t) ref =
   Context.LabeledStmtsMap.find ref context.labeled_stmts
