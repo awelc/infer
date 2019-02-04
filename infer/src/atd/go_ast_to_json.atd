@@ -117,7 +117,8 @@ type stmt_type =
 	| IncDecStmt of inc_dec_stmt_type
 	| BranchStmt of branch_stmt_type
 	| LabeledStmt of labeled_stmt_type
-	| LabeledStmtRef of int]
+	| LabeledStmtRef of int
+	| EmptyStmt of empty_stmt_type ]
 
 type field_type = {
 	uid <json name="Uid"> : int;
@@ -183,6 +184,11 @@ type labeled_stmt_type = {
 	col <json name="Col"> : int;
 	label <json name="Label"> : ident_type;	
 	stmt <json name="Stmt"> : stmt_type;
+}
+
+type empty_stmt_type = {
+	ln <json name="Ln"> : int;
+	col <json name="Col"> : int;
 }
 
 type file_type = {

@@ -116,3 +116,13 @@ outer:
 	}
 	return 42
 }
+
+func qoo(i int) int {
+	var p *int = nil
+	if i == 7 {
+		goto label
+		return *p // no errror
+	label:
+	}
+	return 42
+}

@@ -368,7 +368,7 @@ and trans_branch_stmt (context: Context.t) (stmt: branch_stmt_type) =
       )
 
 
-and trans_labeled_stmt (context: Context.t) stmt =
+and trans_labeled_stmt (context: Context.t) (stmt: labeled_stmt_type) =
   let loc = line_loc_mk_proc context.proc_desc stmt.ln in
   let proc_desc = context.proc_desc in
   let skip_node = create_node proc_desc [] loc (Procdesc.Node.Skip_node ("jump: " ^ stmt.label.id)) in
@@ -383,6 +383,13 @@ and trans_labeled_stmt (context: Context.t) stmt =
 and trans_labeled_stmt_ref (context: Context.t) ref =
   Context.LabeledStmtsMap.find ref context.labeled_stmts
 
+and trans_empty_stmt (context: Context.t) stmt =
+  let proc_desc = context.proc_desc in
+  let loc = line_loc_mk_proc proc_desc stmt.ln in
+  let n = create_node proc_desc [] loc (Procdesc.Node.Skip_node "empty stmt") in
+    n, n, [n]
+
+
 and trans_stmt context = function
   | `DeclStmt (stmt) -> trans_decl_stmt context stmt
   | `ReturnStmt (stmt) -> trans_return_stmt context stmt
@@ -394,6 +401,7 @@ and trans_stmt context = function
   | `BranchStmt (stmt) -> trans_branch_stmt context stmt
   | `LabeledStmt (stmt) -> trans_labeled_stmt context stmt
   | `LabeledStmtRef (ref) -> trans_labeled_stmt_ref context ref
+  | `EmptyStmt (stmt) -> trans_empty_stmt context stmt
 
 and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
   if ((List.length spec.names > 1) || (List.length spec.values > 1)) then raise (Failure "Only single variable declaration supported for now") else (

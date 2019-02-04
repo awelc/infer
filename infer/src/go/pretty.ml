@@ -132,6 +132,7 @@ and pretty_stmt = function
   | `BranchStmt (stmt) -> pretty_branch_stmt stmt
   | `LabeledStmt (stmt) -> pretty_labeled_stmt stmt
   | `LabeledStmtRef (ref) -> pretty_labeled_stmt_ref ref
+  | `EmptyStmt (stmt) -> ""
 
 and pretty_stmt_type body =
   concatmap "\n" pretty_stmt body.stmts

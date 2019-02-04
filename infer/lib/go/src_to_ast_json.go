@@ -475,6 +475,16 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 			fmt.Printf("%s}\n", pad(ind+indInc))
 		}
 		fmt.Printf("%s]\n", pad(ind))
+	case *ast.EmptyStmt:
+		fmt.Printf("%s[\n", pad(ind))
+		fmt.Printf("%s\"EmptyStmt\",\n", pad(ind+indInc))
+		fmt.Printf("%s{\n", pad(ind+indInc))
+		es := node.(*ast.EmptyStmt)
+		pos := fset.PositionFor(es.Semicolon, true)
+		fmt.Printf("%s\"Ln\":%d, \"Col\":%d\n",
+			pad(ind+2*indInc), pos.Line, pos.Column)
+		fmt.Printf("%s}\n", pad(ind+indInc))
+		fmt.Printf("%s]\n", pad(ind))
 	}
 
 }
