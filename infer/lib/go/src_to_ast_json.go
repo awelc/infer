@@ -13,17 +13,9 @@ import (
 
 const indInc = 2
 
-var field_count int64 = 0
-var func_decl_count int64 = 0
-var value_spec_count int64 = 0
-var assign_stmt_count int64 = 0
-var labeled_stmt_count int64 = 0
+var object_count int64 = 0
 
-var fields map[*ast.Field]int64 = make(map[*ast.Field]int64)
-var func_decls map[*ast.FuncDecl]int64 = make(map[*ast.FuncDecl]int64)
-var value_specs map[*ast.ValueSpec]int64 = make(map[*ast.ValueSpec]int64)
-var assign_stmts map[*ast.AssignStmt]int64 = make(map[*ast.AssignStmt]int64)
-var labeled_stmts map[*ast.LabeledStmt]int64 = make(map[*ast.LabeledStmt]int64)
+var objects map[ast.Node]int64 = make(map[ast.Node]int64)
 
 func main() {
 	args := os.Args
@@ -57,6 +49,8 @@ func obj_print(obj ast.Object, fset token.FileSet, ind int) {
 		json_print(n, fset, ind+indInc)
 	case *ast.LabeledStmt:
 		json_print(n, fset, ind+indInc)
+	case *ast.Object:
+		obj_print(*n, fset, ind)
 	default:
 		log.Fatal("Unsupported ast object type (for now)")
 	}
@@ -95,6 +89,13 @@ func block_print(bs ast.BlockStmt, fset token.FileSet, ind int) {
 	fmt.Printf("%s}\n", pad(ind))
 }
 
+func object_uid(node ast.Node) int64 {
+	uid := object_count
+	object_count++
+	objects[node] = uid
+	return uid
+}
+
 func json_print(node ast.Node, fset token.FileSet, ind int) {
 	switch /*t := */ node.(type) {
 	case *ast.File:
@@ -112,16 +113,14 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 		fmt.Println("}")
 	case *ast.FuncDecl:
 		fmt.Printf("%s[\n", pad(ind))
-		fd := node.(*ast.FuncDecl)
-		uid, found := func_decls[fd]
+		uid, found := objects[node]
 		if found {
 			fmt.Printf("%s\"FuncDeclRef\", %d\n", pad(ind+indInc), uid)
 		} else {
+			fd := node.(*ast.FuncDecl)
 			fmt.Printf("%s\"FuncDecl\",\n", pad(ind+indInc))
 			fmt.Printf("%s{\n", pad(ind+indInc))
-			func_decl_uid := func_decl_count
-			func_decls[fd] = func_decl_uid
-			func_decl_count++
+			func_decl_uid := object_uid(node)
 			fmt.Printf("%s\"Uid\":%d, \"Name\":\n", pad(ind+2*indInc), func_decl_uid)
 			ident_print(*fd.Name, fset, ind+2*indInc)
 			fmt.Printf("%s,\n", pad(ind+2*indInc))
@@ -163,16 +162,14 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 		fmt.Printf("%s]\n", pad(ind))
 	case *ast.Field:
 		fmt.Printf("%s[\n", pad(ind))
-		f := node.(*ast.Field)
-		uid, found := fields[f]
+		uid, found := objects[node]
 		if found {
 			fmt.Printf("%s\"FieldRef\", %d\n", pad(ind+indInc), uid)
 		} else {
+			f := node.(*ast.Field)
 			fmt.Printf("%s\"Field\",\n", pad(ind+indInc))
 			fmt.Printf("%s{\n", pad(ind+indInc))
-			field_uid := field_count
-			field_count++
-			fields[f] = field_uid
+			field_uid := object_uid(node)
 			fmt.Printf("%s\"Uid\":%d, \"Names\":\n", pad(ind+2*indInc), field_uid)
 			fmt.Printf("%s[\n", pad(ind+2*indInc))
 			for i, n := range f.Names {
@@ -284,16 +281,14 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 			pad(ind), pos.Line, pos.Column, bl.Kind.String(), bl.Value)
 	case *ast.AssignStmt:
 		fmt.Printf("%s[\n", pad(ind))
-		as := node.(*ast.AssignStmt)
-		uid, found := assign_stmts[as]
+		uid, found := objects[node]
 		if found {
 			fmt.Printf("%s\"AssignStmtRef\", %d\n", pad(ind+indInc), uid)
 		} else {
+			as := node.(*ast.AssignStmt)
 			fmt.Printf("%s\"AssignStmt\",\n", pad(ind+indInc))
 			fmt.Printf("%s{\n", pad(ind+indInc))
-			assign_stmt_uid := assign_stmt_count
-			assign_stmts[as] = assign_stmt_uid
-			assign_stmt_count++
+			assign_stmt_uid := object_uid(node)
 			pos := fset.PositionFor(as.TokPos, true)
 			fmt.Printf("%s\"Uid\":%d, \"Ln\":%d, \"Col\":%d,\n",
 				pad(ind+2*indInc), assign_stmt_uid, pos.Line, pos.Column)
@@ -349,16 +344,14 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 		fmt.Printf("%s]\n", pad(ind))
 	case *ast.ValueSpec:
 		fmt.Printf("%s[\n", pad(ind))
-		vs := node.(*ast.ValueSpec)
-		uid, found := value_specs[vs]
+		uid, found := objects[node]
 		if found {
 			fmt.Printf("%s\"ValueSpecRef\", %d\n", pad(ind+indInc), uid)
 		} else {
+			vs := node.(*ast.ValueSpec)
 			fmt.Printf("%s\"ValueSpec\",\n", pad(ind+indInc))
 			fmt.Printf("%s{\n", pad(ind+indInc))
-			value_spec_uid := value_spec_count
-			value_specs[vs] = value_spec_uid
-			value_spec_count++
+			value_spec_uid := object_uid(node)
 			fmt.Printf("%s\"Uid\":%d, \"Type\":\n", pad(ind+2*indInc), value_spec_uid)
 			json_print(vs.Type, fset, ind+2*indInc)
 			fmt.Printf("%s,\n", pad(ind+2*indInc))
@@ -454,16 +447,14 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 		fmt.Printf("%s]\n", pad(ind))
 	case *ast.LabeledStmt:
 		fmt.Printf("%s[\n", pad(ind))
-		ls := node.(*ast.LabeledStmt)
-		uid, found := labeled_stmts[ls]
+		uid, found := objects[node]
 		if found {
 			fmt.Printf("%s\"LabeledStmtRef\", %d\n", pad(ind+indInc), uid)
 		} else {
+			ls := node.(*ast.LabeledStmt)
 			fmt.Printf("%s\"LabeledStmt\",\n", pad(ind+indInc))
 			fmt.Printf("%s{\n", pad(ind+indInc))
-			labeled_stmt_uid := labeled_stmt_count
-			labeled_stmts[ls] = labeled_stmt_uid
-			labeled_stmt_count++
+			labeled_stmt_uid := object_uid(node)
 			pos := fset.PositionFor(ls.Colon, true)
 			fmt.Printf("%s\"Uid\":%d, \"Ln\":%d, \"Col\":%d,\n",
 				pad(ind+2*indInc), labeled_stmt_uid, pos.Line, pos.Column)

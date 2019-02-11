@@ -1,6 +1,13 @@
 (* context stores per-function data during translation *)
 
-module LocalsMap : Caml.Map.S with type key = string
+module VarKey : sig
+	type t
+	val compare : t -> t -> int
+	val mk : string -> int -> t
+	val to_string : t -> string
+end
+
+module LocalsMap : Caml.Map.S with type key = VarKey.t
 
 module IntMap : Caml.Map.S with type key = int
 

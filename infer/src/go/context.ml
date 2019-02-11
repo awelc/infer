@@ -1,8 +1,14 @@
 open! IStd
 
-module LocalsMap = Caml.Map.Make(struct
-  type t = string [@@deriving compare]
-end)
+module VarKey = struct
+	type t = {uid: int; n: string}
+    let compare v1 v2 =
+      let res = Pervasives.compare v1.uid v2.uid in if (res <> 0) then res else (String.compare v1.n v2.n)
+	let mk s i = {uid = i; n = s}
+	let to_string v = "VAR KEY: " ^ v.n ^ " " ^ (string_of_int v.uid)
+end
+
+module LocalsMap = Caml.Map.Make(VarKey)
 
 module IntMap = Caml.Map.Make(struct
   type t = int [@@deriving compare]

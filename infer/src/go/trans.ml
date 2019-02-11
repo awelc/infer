@@ -54,11 +54,26 @@ and trans_lit context kind value =
     | "INT" -> 
       [], Exp.int (IntLit.of_int (int_of_string value)), Typ.mk (Tint Typ.IInt) )
 
-and trans_var (context: Context.t) name line =
-    let (pvar, var_type) = Context.LocalsMap.find name context.locals_map in
+and get_var_key ident =
+  let n = ident.id in
+  match ident.obj with
+    | None -> raise (Failure "Variable reference must point to a definition")
+    | Some (obj) -> (
+      match obj with 
+        | `Field (o) -> Context.VarKey.mk n o.uid
+        | `FieldRef (ref) -> Context.VarKey.mk n ref
+        | `ValueSpec (o) -> Context.VarKey.mk n o.uid
+        | `ValueSpecRef (ref) -> Context.VarKey.mk n ref
+        | `AssignStmt (o) -> Context.VarKey.mk n o.uid
+        | `AssignStmtRef (ref) -> Context.VarKey.mk n ref    
+    )
+
+and trans_var (context: Context.t) ident =
+    let (pvar, var_type) = Context.LocalsMap.find (get_var_key ident) context.locals_map in
     let id = Ident.create_fresh Ident.knormal in
-    let load_instr = Sil.Load (id, Exp.Lvar
-     pvar, var_type, line_loc_mk_proc context.proc_desc line) in
+    let load_instr = 
+      Sil.Load (id, Exp.Lvar pvar, var_type, line_loc_mk_proc context.proc_desc ident.ln)
+    in
       pvar, [load_instr], Exp.Var id, var_type
 
 and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t * Typ.t) = 
@@ -66,7 +81,7 @@ and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t *
       | `Ident (ident) ->       
         (match ident.id with 
           | "nil" -> [], Exp.null, Typ.mk (Typ.Tptr ((Typ.mk (Tint Typ.IInt)), Typ.Pk_pointer))
-          | _ -> let _, instr, value, typ = trans_var context ident.id ident.ln in 
+          | _ -> let _, instr, value, typ = trans_var context ident in 
               instr, value, typ)
       | `StarExpr (expr) -> 
         let load_ptr_list, ptr_var, ptr_var_type = trans_exp context expr.x in
@@ -79,7 +94,7 @@ and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t *
           | "&" -> 
             (match expr.x with
               | `Ident (ident) -> (* must be a variable *)
-                let (pvar, var_type) = Context.LocalsMap.find ident.id context.locals_map in
+                let (pvar, var_type) = Context.LocalsMap.find (get_var_key ident) context.locals_map in
                   [], Exp.Lvar pvar, Typ.mk (Typ.Tptr (var_type, Typ.Pk_pointer)) ) )
       | `BinaryExpr (expr) ->
         let binop, is_bool = get_binop expr.op in
@@ -195,16 +210,18 @@ and trans_assign_stmt (context : Context.t) stmt =
     let rhs = List.nth_exn stmt.rhs 0 in
       match lhs with
         | `Ident (ident) -> (* must be a variable *)
-          let name = ident.id in
           let ex_instr, ex_val, ex_type = trans_exp context rhs in
           let var_lookup = 
             try
-              let (pvar, var_type) = Context.LocalsMap.find name context.locals_map in
+              let (pvar, var_type) = Context.LocalsMap.find (get_var_key ident) context.locals_map in
                 if (not (Typ.equal var_type ex_type)) then raise (Failure "Incorrect type assigned") else ();
                 pvar
             with Not_found -> 
-              let pvar = Pvar.mk (Mangled.from_string name) (Procdesc.get_proc_name proc_desc) in
-                context.locals_map <-  Context.LocalsMap.add name (pvar, ex_type) context.locals_map;
+              let var_name = Mangled.from_string ident.id in
+              let pvar = Pvar.mk var_name (Procdesc.get_proc_name proc_desc) in
+              let var : ProcAttributes.var_data = {name = var_name; typ = ex_type; modify_in_block = false; is_constexpr = false} in
+                context.locals_map <-  Context.LocalsMap.add (get_var_key ident) (pvar, ex_type) context.locals_map;
+                context.locals_list <- var :: context.locals_list;
                 pvar               
           in
             let pvar = var_lookup in
@@ -293,7 +310,7 @@ and trans_inc_dec_stmt (context: Context.t) stmt =
   match stmt.x with
     | `Ident (ident) -> (* must be a variable *)
       let proc_desc = context.proc_desc in
-      let lhs_pvar, lhs_instr, lhs_val, lhs_type = trans_var context ident.id stmt.ln in
+      let lhs_pvar, lhs_instr, lhs_val, lhs_type = trans_var context ident in
       let _, inc_val, _ = trans_lit context (typ_desc_to_kind lhs_type.desc) "1" in
       let loc = line_loc_mk_proc proc_desc stmt.ln in
       let binop_op = match stmt.op with | "++" -> "+" | "--" -> "-" in
@@ -406,7 +423,8 @@ and trans_stmt context = function
 and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
   if ((List.length spec.names > 1) || (List.length spec.values > 1)) then raise (Failure "Only single variable declaration supported for now") else (
     let proc_desc = context.proc_desc in
-    let name = (List.nth_exn spec.names 0).id in
+    let ident = (List.nth_exn spec.names 0) in
+    let name = ident.id in
     let var_name = Mangled.from_string name in
     let t = trans_type spec.t in
     (* TODO GO: handle the case when no value to assign exists *)
@@ -417,7 +435,7 @@ and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
     let decl_instr = Sil.Store (Exp.Lvar pvar, ex_type, ex_val, loc) in
     let var : ProcAttributes.var_data = {name = var_name; typ = ex_type; modify_in_block = false; is_constexpr = false} in
       if (not (Typ.equal t ex_type)) then raise (Failure "Incorrect type assigned in declaration") else ();
-      context.locals_map <- Context.LocalsMap.add name (pvar, ex_type) context.locals_map;
+      context.locals_map <- Context.LocalsMap.add (get_var_key ident) (pvar, ex_type) context.locals_map;
       context.locals_list <- var :: context.locals_list;
       let n = create_node_method proc_desc (ex_instr @ [decl_instr]) loc in
         n, n, [n]
@@ -451,24 +469,30 @@ and trans_func_decl (go_cfg : Context.gocfg) decl : Procdesc.t =
     let start_node = create_node proc_desc [] loc_start Procdesc.Node.Start_node in
     let exit_node = create_node proc_desc [] loc_exit Procdesc.Node.Exit_node in
     let context = Context.create_context proc_desc go_cfg exit_node in
-    let param_to_local = function
-      | (n, t) -> 
-        let pvar = Pvar.mk n func_name in
-        let var : ProcAttributes.var_data = {name = n; typ = t; modify_in_block = false; is_constexpr = false} in
-          context.locals_map <- Context.LocalsMap.add (Mangled.to_string n) (pvar, t) context.locals_map
+    let param_to_local param =
+      match param with 
+        | `Field (field) ->
+          if (List.length field.names > 1) then raise (Failure "Function parameter can have only one name") else (
+            let ident = List.nth_exn field.names 0 in
+            let n = ident.id in
+            let t = trans_type field.t in
+            let pvar = Pvar.mk (Mangled.from_string n) func_name in
+              context.locals_map <- Context.LocalsMap.add (get_var_key ident) (pvar, t) context.locals_map
+          )
     in
-    let func_nodes = List.iter params param_to_local in
-    let first_node, _, nodes_to_next = trans_body context body in
-    let exit_nodes = [exit_node] in
-      (* connect start node to the beginning of the function body *)
-      Procdesc.node_set_succs_exn proc_desc start_node [first_node] exit_nodes;
-      (* connect nodes of the function body to exit node *)
-      List.iter ~f:(fun (n) -> Procdesc.node_set_succs_exn proc_desc n exit_nodes exit_nodes) nodes_to_next;
-      go_cfg.func_decls <- Context.FuncDeclsMap.add decl.uid proc_desc go_cfg.func_decls;
-      Procdesc.set_start_node proc_desc start_node;
-      Procdesc.set_exit_node proc_desc exit_node;
-      Procdesc.append_locals proc_desc (List.rev context.locals_list);
-      proc_desc
+      (* add parameters to the list of local variables *)
+      List.iter ~f:param_to_local func_type.params;
+      let first_node, _, nodes_to_next = trans_body context body in
+      let exit_nodes = [exit_node] in
+        (* connect start node to the beginning of the function body *)
+        Procdesc.node_set_succs_exn proc_desc start_node [first_node] exit_nodes;
+        (* connect nodes of the function body to exit node *)
+        List.iter ~f:(fun (n) -> Procdesc.node_set_succs_exn proc_desc n exit_nodes exit_nodes) nodes_to_next;
+        go_cfg.func_decls <- Context.FuncDeclsMap.add decl.uid proc_desc go_cfg.func_decls;
+        Procdesc.set_start_node proc_desc start_node;
+        Procdesc.set_exit_node proc_desc exit_node;
+        Procdesc.append_locals proc_desc (List.rev context.locals_list);
+        proc_desc
   )
 
 and trans_decl context = function
