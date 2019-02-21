@@ -245,7 +245,7 @@ and trans_cond context cond body line =
   let prune_node_true = create_node proc_desc [prune_instr_true] loc node_kind_true in
   (* create nodes in the true_branch *)
   let true_first_node, true_last_node, true_nodes_to_next = trans_body context body in 
-  let prune_node_false = create_node proc_desc (cond_instr @ [prune_instr_false]) loc node_kind_false in
+  let prune_node_false = create_node proc_desc [prune_instr_false] loc node_kind_false in
     (* connect prune node of the true branch with the first node of this branch *)
     ignore (connect_with_next_node context [prune_node_true] true_first_node); 
     (* link split node with the false and true prune nodes - we know all nodes so regular node_set_succs_exn can be used *)
