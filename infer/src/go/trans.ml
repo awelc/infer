@@ -211,16 +211,17 @@ and trans_assign_stmt (context : Context.t) stmt =
       match lhs with
         | `Ident (ident) -> (* must be a variable *)
           let ex_instr, ex_val, ex_type = trans_exp context rhs in
+          let var_key = get_var_key ident in
           let var_lookup = 
             try
-              let (pvar, var_type) = Context.LocalsMap.find (get_var_key ident) context.locals_map in
+              let (pvar, var_type) = Context.LocalsMap.find var_key context.locals_map in
                 if (not (Typ.equal var_type ex_type)) then raise (Failure "Incorrect type assigned") else ();
                 pvar
-            with Not_found -> 
-              let var_name = Mangled.from_string ident.id in
+            with Not_found ->
+              let var_name = Context.VarKey.to_mangled var_key in
               let pvar = Pvar.mk var_name (Procdesc.get_proc_name proc_desc) in
               let var : ProcAttributes.var_data = {name = var_name; typ = ex_type; modify_in_block = false; is_constexpr = false} in
-                context.locals_map <-  Context.LocalsMap.add (get_var_key ident) (pvar, ex_type) context.locals_map;
+                context.locals_map <-  Context.LocalsMap.add var_key (pvar, ex_type) context.locals_map;
                 context.locals_list <- var :: context.locals_list;
                 pvar               
           in
@@ -243,9 +244,9 @@ and trans_cond context cond body line =
   let node_kind_true = Procdesc.Node.Prune_node (true, Sil.Ik_if, "method_body") in
   let node_kind_false = Procdesc.Node.Prune_node (false, Sil.Ik_if, "method_body") in
   let prune_node_true = create_node proc_desc [prune_instr_true] loc node_kind_true in
+  let prune_node_false = create_node proc_desc [prune_instr_false] loc node_kind_false in
   (* create nodes in the true_branch *)
   let true_first_node, true_last_node, true_nodes_to_next = trans_body context body in 
-  let prune_node_false = create_node proc_desc [prune_instr_false] loc node_kind_false in
     (* connect prune node of the true branch with the first node of this branch *)
     ignore (connect_with_next_node context [prune_node_true] true_first_node); 
     (* link split node with the false and true prune nodes - we know all nodes so regular node_set_succs_exn can be used *)
@@ -424,8 +425,8 @@ and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
   if ((List.length spec.names > 1) || (List.length spec.values > 1)) then raise (Failure "Only single variable declaration supported for now") else (
     let proc_desc = context.proc_desc in
     let ident = (List.nth_exn spec.names 0) in
-    let name = ident.id in
-    let var_name = Mangled.from_string name in
+    let var_key = get_var_key ident in
+    let var_name = Context.VarKey.to_mangled var_key in
     let t = trans_type spec.t in
     (* TODO GO: handle the case when no value to assign exists *)
     let ex = List.nth_exn spec.values 0 in
@@ -435,7 +436,7 @@ and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
     let decl_instr = Sil.Store (Exp.Lvar pvar, ex_type, ex_val, loc) in
     let var : ProcAttributes.var_data = {name = var_name; typ = ex_type; modify_in_block = false; is_constexpr = false} in
       if (not (Typ.equal t ex_type)) then raise (Failure "Incorrect type assigned in declaration") else ();
-      context.locals_map <- Context.LocalsMap.add (get_var_key ident) (pvar, ex_type) context.locals_map;
+      context.locals_map <- Context.LocalsMap.add var_key (pvar, ex_type) context.locals_map;
       context.locals_list <- var :: context.locals_list;
       let n = create_node_method proc_desc (ex_instr @ [decl_instr]) loc in
         n, n, [n]
@@ -476,8 +477,10 @@ and trans_func_decl (go_cfg : Context.gocfg) decl : Procdesc.t =
             let ident = List.nth_exn field.names 0 in
             let n = ident.id in
             let t = trans_type field.t in
-            let pvar = Pvar.mk (Mangled.from_string n) func_name in
-              context.locals_map <- Context.LocalsMap.add (get_var_key ident) (pvar, t) context.locals_map
+            let var_key = get_var_key ident in
+            let var_name = Context.VarKey.to_mangled var_key in
+            let pvar = Pvar.mk var_name func_name in
+              context.locals_map <- Context.LocalsMap.add var_key (pvar, t) context.locals_map
           )
     in
       (* add parameters to the list of local variables *)

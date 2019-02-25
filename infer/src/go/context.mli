@@ -5,6 +5,7 @@ module VarKey : sig
 	val compare : t -> t -> int
 	val mk : string -> int -> t
 	val to_string : t -> string
+	val to_mangled : t -> Mangled.t
 end
 
 module LocalsMap : Caml.Map.S with type key = VarKey.t

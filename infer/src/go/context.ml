@@ -6,6 +6,7 @@ module VarKey = struct
       let res = Pervasives.compare v1.uid v2.uid in if (res <> 0) then res else (String.compare v1.n v2.n)
 	let mk s i = {uid = i; n = s}
 	let to_string v = "VAR KEY: " ^ v.n ^ " " ^ (string_of_int v.uid)
+	let to_mangled v = Mangled.mangled v.n (string_of_int v.uid)
 end
 
 module LocalsMap = Caml.Map.Make(VarKey)
