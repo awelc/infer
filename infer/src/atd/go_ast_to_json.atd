@@ -62,9 +62,9 @@ type expr_type =
 
 type value_spec_type = {
 	uid <json name="Uid"> : int;
-	t <json name="Type"> : expr_type;
+	?t <json name="Type"> : expr_type option;
 	names <json name="Names"> : ident_type list;
-	values <json name="Values"> : expr_type list;
+	?values <json name="Values"> : expr_type list option;
 }
 
 type spec_type =

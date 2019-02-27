@@ -23,9 +23,21 @@ and pretty_func_decl fdecl =
     | Some (s) -> s
 
 and pretty_value_spec (vspec : value_spec_type) : string =
-  if ((List.length vspec.names > 1) || (List.length vspec.values > 1)) then raise (Failure "Only single variable declaration supported for now") else (
-    pretty_ident (List.nth_exn vspec.names 0) ^ " " ^ pretty_expr vspec.t ^  
-      if (phys_equal (List.length vspec.values) 1) then " = " ^ (pretty_expr (List.nth_exn vspec.values 0)) else ("")
+  if (List.length vspec.names > 1) then raise (Failure "Only single variable declaration supported for now") else (
+    let ts = (
+      match vspec.t with
+        | None -> ""
+        | Some (t) -> " " ^ pretty_expr t
+    ) in
+    let vs = (
+      match vspec.values with
+        | None -> ""
+        | Some (values) ->
+          if (List.length values > 1) then raise (Failure "Only single variable initialization supported for now") else (
+            " = " ^ (pretty_expr (List.nth_exn values 0))
+          )
+    ) in
+      pretty_ident (List.nth_exn vspec.names 0) ^ ts ^ vs
   )
 
 and pretty_spec = function

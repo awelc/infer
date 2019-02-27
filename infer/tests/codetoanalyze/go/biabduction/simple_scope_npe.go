@@ -53,10 +53,10 @@ func fok(a *int, b *int) int {
 }
 
 func bar(a int) int {
-	var p *int = nil
+	var p *int
 	var p2 *int = nil
 	{
-		var i int = 42
+		var i = 42
 		var p *int = &i
 		p2 = p
 	}

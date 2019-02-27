@@ -352,9 +352,12 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 			fmt.Printf("%s\"ValueSpec\",\n", pad(ind+indInc))
 			fmt.Printf("%s{\n", pad(ind+indInc))
 			value_spec_uid := object_uid(node)
-			fmt.Printf("%s\"Uid\":%d, \"Type\":\n", pad(ind+2*indInc), value_spec_uid)
-			json_print(vs.Type, fset, ind+2*indInc)
-			fmt.Printf("%s,\n", pad(ind+2*indInc))
+			fmt.Printf("%s\"Uid\":%d,\n", pad(ind+2*indInc), value_spec_uid)
+			if vs.Type != nil {
+				fmt.Printf("%s\"Type\":\n", pad(ind+2*indInc))
+				json_print(vs.Type, fset, ind+2*indInc)
+				fmt.Printf("%s,\n", pad(ind+2*indInc))
+			}
 			fmt.Printf("%s\"Names\":\n", pad(ind+2*indInc))
 			fmt.Printf("%s[\n", pad(ind+2*indInc))
 			for i, n := range vs.Names {
@@ -364,16 +367,18 @@ func json_print(node ast.Node, fset token.FileSet, ind int) {
 				ident_print(*n, fset, ind+3*indInc)
 			}
 			fmt.Printf("%s]\n", pad(ind+2*indInc))
-			fmt.Printf("%s,\n", pad(ind+2*indInc))
-			fmt.Printf("%s\"Values\":\n", pad(ind+2*indInc))
-			fmt.Printf("%s[\n", pad(ind+2*indInc))
-			for i, v := range vs.Values {
-				if i > 0 {
-					fmt.Printf("%s,\n", pad(ind+3*indInc))
+			if vs.Values != nil {
+				fmt.Printf("%s,\n", pad(ind+2*indInc))
+				fmt.Printf("%s\"Values\":\n", pad(ind+2*indInc))
+				fmt.Printf("%s[\n", pad(ind+2*indInc))
+				for i, v := range vs.Values {
+					if i > 0 {
+						fmt.Printf("%s,\n", pad(ind+3*indInc))
+					}
+					json_print(v, fset, ind+3*indInc)
 				}
-				json_print(v, fset, ind+3*indInc)
+				fmt.Printf("%s]\n", pad(ind+2*indInc))
 			}
-			fmt.Printf("%s]\n", pad(ind+2*indInc))
 			fmt.Printf("%s}\n", pad(ind+indInc))
 		}
 		fmt.Printf("%s]\n", pad(ind))

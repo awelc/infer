@@ -29,6 +29,12 @@ let typ_desc_to_kind = function
     match kind with 
       | Typ.IInt -> "INT"
 
+let typ_desc_to_default = function
+  | Typ.Tptr _ -> Exp.null
+  | Typ.Tint (kind) ->
+    match kind with 
+      | Typ.IInt -> Exp.int (IntLit.of_int 0)
+
 let create_node proc_desc instructions loc kind =
   Procdesc.create_node proc_desc loc kind instructions
 
@@ -203,9 +209,17 @@ and trans_return_stmt (context : Context.t) (stmt : return_stmt_type) =
       n, n, []
   )
 
+and pvar_create (context : Context.t) var_key ex_type =
+  let var_name = Context.VarKey.to_mangled var_key in
+  let pvar = Pvar.mk var_name (Procdesc.get_proc_name context.proc_desc) in
+  let var : ProcAttributes.var_data = {name = var_name; typ = ex_type; modify_in_block = false; is_constexpr = false} in
+    context.locals_map <-  Context.LocalsMap.add var_key (pvar, ex_type) context.locals_map;
+    context.locals_list <- var :: context.locals_list;
+    pvar
+
+
 and trans_assign_stmt (context : Context.t) stmt =
   if ((List.length stmt.lhs > 1) || (List.length stmt.rhs > 1)) then raise (Failure "Only single value assignment supported for now") else (
-    let proc_desc = context.proc_desc in
     let lhs = List.nth_exn stmt.lhs 0 in
     let rhs = List.nth_exn stmt.rhs 0 in
       match lhs with
@@ -218,13 +232,9 @@ and trans_assign_stmt (context : Context.t) stmt =
                 if (not (Typ.equal var_type ex_type)) then raise (Failure "Incorrect type assigned") else ();
                 pvar
             with Not_found ->
-              let var_name = Context.VarKey.to_mangled var_key in
-              let pvar = Pvar.mk var_name (Procdesc.get_proc_name proc_desc) in
-              let var : ProcAttributes.var_data = {name = var_name; typ = ex_type; modify_in_block = false; is_constexpr = false} in
-                context.locals_map <-  Context.LocalsMap.add var_key (pvar, ex_type) context.locals_map;
-                context.locals_list <- var :: context.locals_list;
-                pvar               
+                pvar_create context var_key ex_type             
           in
+            let proc_desc = context.proc_desc in
             let pvar = var_lookup in
             let loc = line_loc_mk_proc proc_desc stmt.ln in
             let assign_instr = Sil.Store (Exp.Lvar pvar, ex_type, ex_val, loc) in
@@ -421,25 +431,41 @@ and trans_stmt context = function
   | `LabeledStmtRef (ref) -> trans_labeled_stmt_ref context ref
   | `EmptyStmt (stmt) -> trans_empty_stmt context stmt
 
+and trans_var_init (context : Context.t) (spec : value_spec_type) =
+  (* in variable declaration type declaration, or init value, or both can be used for initialization *)
+  match spec.values with
+    | Some (values) -> 
+      if (List.length values > 1) then raise (Failure "Only single variable initialization supported for now") else (
+        let ex = List.nth_exn values 0 in
+        let ex_instr, ex_val, ex_type = trans_exp context ex in
+        let _ = (
+          match spec.t with
+            | Some (t) -> 
+              if (not (Typ.equal (trans_type t) ex_type)) then raise (Failure "Incorrect type assigned in declaration")
+            | None -> ()
+        ) in
+          ex_instr, ex_val, ex_type
+      )
+    | None ->
+      match spec.t with
+        | Some (t) -> 
+          let ex_type = trans_type t in
+          let ex_val = typ_desc_to_default ex_type.desc in
+          [], ex_val, ex_type
+        | None -> raise (Failure "Variable declaration cannot miss both type and initializing value")
+
+
 and trans_var_spec (context : Context.t) ln (spec : value_spec_type)   =
-  if ((List.length spec.names > 1) || (List.length spec.values > 1)) then raise (Failure "Only single variable declaration supported for now") else (
+  if (List.length spec.names > 1) then raise (Failure "Only single variable declaration supported for now") else (
     let proc_desc = context.proc_desc in
     let ident = (List.nth_exn spec.names 0) in
     let var_key = get_var_key ident in
-    let var_name = Context.VarKey.to_mangled var_key in
-    let t = trans_type spec.t in
-    (* TODO GO: handle the case when no value to assign exists *)
-    let ex = List.nth_exn spec.values 0 in
-    let pvar = Pvar.mk var_name (Procdesc.get_proc_name proc_desc) in
-    let ex_instr, ex_val, ex_type = trans_exp context ex in
+    let ex_instr, ex_val, ex_type = trans_var_init context spec in
+    let pvar = pvar_create context var_key ex_type in
     let loc = line_loc_mk_proc proc_desc ln in
     let decl_instr = Sil.Store (Exp.Lvar pvar, ex_type, ex_val, loc) in
-    let var : ProcAttributes.var_data = {name = var_name; typ = ex_type; modify_in_block = false; is_constexpr = false} in
-      if (not (Typ.equal t ex_type)) then raise (Failure "Incorrect type assigned in declaration") else ();
-      context.locals_map <- Context.LocalsMap.add var_key (pvar, ex_type) context.locals_map;
-      context.locals_list <- var :: context.locals_list;
-      let n = create_node_method proc_desc (ex_instr @ [decl_instr]) loc in
-        n, n, [n]
+    let n = create_node_method proc_desc (ex_instr @ [decl_instr]) loc in
+      n, n, [n]
  )
 
 and trans_spec context ln = function
@@ -510,7 +536,7 @@ let compute_icfg source_file =
   let stdout = Unix.open_process_in ("go run " ^ go_to_json ^ " -- " ^ (SourceFile.to_string source_file)) in
   let go_file = Atdgen_runtime.Util.Json.from_channel read_file_type stdout in
   let _ = Unix.close_process_in stdout in
-(*    print_endline (Pretty.pretty_file go_file); *)
+    print_endline (Pretty.pretty_file go_file); 
     let go_cfg = Context.create_cfg source_file in
      List.iter ~f:(fun (decl) -> create_fn_desc go_cfg decl) go_file.decls;
       go_cfg.cfg
