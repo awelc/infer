@@ -52,7 +52,11 @@ and trans_res_type = function
 and trans_param = function
   | `Field (field) ->
     if (List.length field.names > 1) then raise (Failure "Function parameter can have only one name") else (
-      (Mangled.from_string (List.nth_exn field.names 0).id,  trans_type field.t)
+      let ident = List.nth_exn field.names 0 in
+      let param_type = trans_type field.t in
+      let var_key = get_var_key ident in
+      let param_name = Context.VarKey.to_mangled var_key in
+        param_name, param_type
     )
 
 and trans_lit context kind value =
