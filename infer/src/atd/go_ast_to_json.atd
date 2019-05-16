@@ -1,9 +1,8 @@
 type object_type =
 	[ FuncDecl of func_decl_type
 	| FuncDeclRef of int
-	| Field of field_type	
 	| FieldRef of int
-	| ValueSpec of value_spec_type
+	| ValueSpec of value_spec_type 
 	| ValueSpecRef of int 
 	| AssignStmt of assign_stmt_type
 	| AssignStmtRef of int
@@ -68,7 +67,7 @@ type value_spec_type = {
 }
 
 type spec_type =
-	[ValueSpec of value_spec_type]
+	[ ValueSpec of value_spec_type ]
 
 type gen_decl_type = {
 	ln <json name="Ln"> : int;
@@ -77,10 +76,13 @@ type gen_decl_type = {
 	specs <json name="Specs"> : spec_type list;
 }
 
+type func_desc_type =
+	[ FuncTypeRef of int ]
+
 type func_decl_type = {
 	uid <json name="Uid"> : int;
 	name <json name="Name"> : ident_type;
-	func_type <json name="FuncType"> : func_type_type;
+	func_desc <json name="FuncDesc"> : func_desc_type;
 	body <json name="Body"> : block_stmt_type;
 }
 
@@ -109,7 +111,7 @@ type assign_stmt_type = {
 
 type stmt_type =
 	[ DeclStmt of decl_stmt_type
-	| ReturnStmt of return_stmt_type 
+	| ReturnStmt of return_stmt_type
 	| AssignStmt of assign_stmt_type
 	| BlockStmt of block_stmt_type
 	| IfStmt of if_stmt_type 
@@ -127,9 +129,10 @@ type field_type = {
 }
 
 type field_list_el_type =
-	[ Field of field_type ]
+	[ FieldRef of int ]
 
 type func_type_type = {
+	uid <json name="Uid"> : int;
 	ln <json name="Ln"> : int;
 	col <json name="Col"> : int;
     params <json name="Params"> : field_list_el_type list;
@@ -191,6 +194,17 @@ type empty_stmt_type = {
 	col <json name="Col"> : int;
 }
 
+type func_sig_type = {
+	name <json name="Name"> : string;
+	func_desc <json name="FuncDesc"> : func_desc_type;
+}
+
+type def_type = 
+	[ FuncType of func_type_type
+	| Field of field_type ]
+
 type file_type = {
+	defs <json name="Defs"> : def_type list;
 	decls <json name="Decls"> : decl_type list;
+	funcs <json name="Funcs"> : func_sig_type list;
 }

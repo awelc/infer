@@ -5,5 +5,5 @@ func foo() int {
 }
 
 func bar(i *int) int {
-	return *i
+	return *i // error
 }

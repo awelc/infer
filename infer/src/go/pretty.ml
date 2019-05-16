@@ -1,26 +1,28 @@
 open! IStd
 open Go_ast_to_json_t
 
-let funcs_map = Int.Table.create () ~size:8
+let func_decls_map = Int.Table.create () ~size:8
+let func_types_map = Int.Table.create () ~size:8
+let fields_map = Int.Table.create () ~size:8
 let labeled_stmts_map = Int.Table.create () ~size:8
 
 let concatmap sep fn l =  String.concat ~sep:(sep) (List.map ~f:(fn) l)
 
 let rec pretty_file go_file =
+  List.iter ~f:(get_def) go_file.defs;
   concatmap "\n" pretty_decl go_file.decls
+
+and get_def = function 
+  | `FuncType (t) -> Hashtbl.replace func_types_map t.uid t
+  | `Field (field) -> Hashtbl.replace fields_map field.uid field
 
 and pretty_decl = function
   | `GenDecl (decl) -> pretty_gen_decl decl
-  | `FuncDecl (decl) -> pretty_func_decl decl
-  | `FuncDeclRef (ref) -> 
-      (match Hashtbl.find funcs_map ref with
-        | None -> raise (Failure "Should not happen")
-        | Some (s) -> s )
+  | `FuncDecl (decl) -> Hashtbl.replace func_decls_map decl.uid decl; pretty_func_decl decl
+  | `FuncDeclRef (ref) -> pretty_func_decl (Hashtbl.find_exn func_decls_map ref)
     
 and pretty_func_decl fdecl = 
-  match Hashtbl.find funcs_map fdecl.uid with
-    | None -> "func " ^ (pretty_ident fdecl.name) ^ (pretty_func_type fdecl.func_type) ^ " {\n" ^ (pretty_stmt_type fdecl.body) ^ "\n}\n"
-    | Some (s) -> s
+  "func " ^ (pretty_ident fdecl.name) ^ (pretty_func_type (get_func_type fdecl.func_desc)) ^ " {\n" ^ (pretty_stmt_type fdecl.body) ^ "\n}\n"
 
 and pretty_value_spec (vspec : value_spec_type) : string =
   if (List.length vspec.names > 1) then raise (Failure "Only single variable declaration supported for now") else (
@@ -41,7 +43,7 @@ and pretty_value_spec (vspec : value_spec_type) : string =
   )
 
 and pretty_spec = function
-  | `ValueSpec (vspec) -> pretty_value_spec vspec
+  | `ValueSpec (spec : value_spec_type) -> pretty_value_spec spec
 
 and pretty_gen_decl gdecl =
   if (List.length gdecl.specs > 1) then raise (Failure "Only one declaration specification supported for now") else (
@@ -54,13 +56,11 @@ and pretty_ident ident =
     | Some (o) ->
       match o with
         | `FuncDecl (decl) -> 
-          let s = pretty_func_decl decl in
-            Hashtbl.replace funcs_map ~key:decl.uid ~data:s;
-            ident.id
+          Hashtbl.replace func_decls_map decl.uid decl;
+          ident.id
         | `LabeledStmt (stmt) -> 
-          let s = pretty_labeled_stmt stmt in
-            Hashtbl.replace labeled_stmts_map ~key:stmt.uid ~data:s;
-            ident.id
+          Hashtbl.replace labeled_stmts_map stmt.uid stmt;
+          ident.id
         | _ -> ident.id
 
 and pretty_star_expr (expr : star_expr_type) : string =
@@ -77,11 +77,15 @@ and pretty_expr = function
   | `BasicLit (lit) -> lit.value  
   | `CallExpr (expr) -> pretty_call_expr expr
 
-and pretty_res_typ = function
-  | `Field (field) -> pretty_expr field.t
+and get_field = function
+    | `FieldRef (ref) -> Hashtbl.find_exn fields_map ref
 
-and pretty_param = function
-  | `Field (field) ->
+and pretty_res_typ f =
+  let field = get_field f in
+    pretty_expr field.t
+
+and pretty_param f =
+  let field = get_field f in  
     if (List.length field.names > 1) then raise (Failure "Function parameter can have only one name") else (
       pretty_ident (List.nth_exn field.names 0) ^ " " ^ pretty_expr field.t
     )
@@ -90,6 +94,11 @@ and pretty_func_type func_type =
   if (List.length func_type.results > 1) then raise (Failure "Only one result value supported for now") else (
     "(" ^ (concatmap ", " pretty_param func_type.params) ^ ") " ^  (pretty_res_typ (List.nth_exn func_type.results 0))  
   )
+
+and get_func_type = function
+  | `FuncTypeRef (ref) ->
+    Hashtbl.find_exn func_types_map ref
+
 
 and pretty_decl_stmt stmt =
   pretty_decl stmt.decl 
@@ -128,9 +137,7 @@ and pretty_labeled_stmt stmt =
   pretty_ident stmt.label ^ ":\n" ^ pretty_stmt stmt.stmt
 
 and pretty_labeled_stmt_ref ref =
-      (match Hashtbl.find labeled_stmts_map ref with
-        | None -> raise (Failure "Should not happen")
-        | Some (s) -> s )
+  pretty_labeled_stmt (Hashtbl.find_exn labeled_stmts_map ref)
 
   
 and pretty_stmt = function
@@ -142,7 +149,7 @@ and pretty_stmt = function
   | `ForStmt (stmt) -> pretty_for_stmt stmt
   | `IncDecStmt (stmt) -> pretty_inc_dec_stmt stmt
   | `BranchStmt (stmt) -> pretty_branch_stmt stmt
-  | `LabeledStmt (stmt) -> pretty_labeled_stmt stmt
+  | `LabeledStmt (stmt) -> Hashtbl.replace labeled_stmts_map stmt.uid stmt; pretty_labeled_stmt stmt
   | `LabeledStmtRef (ref) -> pretty_labeled_stmt_ref ref
   | `EmptyStmt (stmt) -> ""
 

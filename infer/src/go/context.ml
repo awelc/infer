@@ -17,16 +17,31 @@ end)
 
 module FuncDeclsMap = IntMap
 
+module FuncTypesMap = IntMap
+
+module FieldsMap = IntMap
+
 module LabeledStmtsMap = IntMap
 
 module LabelNodesMap = IntMap
 
 module NestMap = Procdesc.NodeMap
 
+module FuncSigsMap = Caml.Map.Make(struct
+  type t = string [@@deriving compare]
+end)
+
+type gomodule = 
+	{ mutable func_sigs : (Typ.t) FuncSigsMap.t 
+	; mutable files : string list }
+
 type gocfg = 
 	{ cfg: Cfg.t
 	; src_file: SourceFile.t
-	; mutable func_decls: (Procdesc.t) FuncDeclsMap.t }
+	; mutable func_decls: (Procdesc.t) FuncDeclsMap.t 
+	; mutable func_types: (Go_ast_to_json_t.func_type_type) FuncTypesMap.t
+	; mutable fields : (Go_ast_to_json_t.field_type) FieldsMap.t
+	; go_module : gomodule }
 
 type t =
 	{ proc_desc: Procdesc.t
@@ -59,7 +74,15 @@ let create_context proc_desc go_cfg exit_node =
 	; exit_node
 	; go_cfg }
 
-let create_cfg file = 
+let create_cfg m file = 
 	{ cfg = Cfg.create ()
 	; src_file = file
-	; func_decls = FuncDeclsMap.empty }
+	; func_decls = FuncDeclsMap.empty
+	; func_types = FuncTypesMap.empty 
+	; fields = FieldsMap.empty
+	; go_module = m }
+
+let create_module paths = 
+	{ func_sigs = FuncSigsMap.empty
+	; files = paths }
+

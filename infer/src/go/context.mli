@@ -14,16 +14,29 @@ module IntMap : Caml.Map.S with type key = int
 
 module FuncDeclsMap : Caml.Map.S with type key = int
 
+module FuncTypesMap : Caml.Map.S with type key = int
+
+module FieldsMap : Caml.Map.S with type key = int
+
 module LabeledStmtsMap : Caml.Map.S with type key = int
 
 module LabelNodesMap : Caml.Map.S with type key = int
 
 module NestMap : Caml.Map.S with type key = Procdesc.Node.t
 
+module FuncSigsMap : Caml.Map.S with type key = string
+
+type gomodule = 
+	{ mutable func_sigs : (Typ.t) FuncSigsMap.t
+	; mutable files : string list }
+
 type gocfg = 
 	{ cfg: Cfg.t
 	; src_file: SourceFile.t
-	; mutable func_decls: (Procdesc.t) FuncDeclsMap.t }
+	; mutable func_decls: (Procdesc.t) FuncDeclsMap.t
+	; mutable func_types : (Go_ast_to_json_t.func_type_type) FuncTypesMap.t
+	; mutable fields : (Go_ast_to_json_t.field_type) FieldsMap.t 
+	; go_module : gomodule }
 
 type t =
 	{ proc_desc: Procdesc.t
@@ -52,4 +65,6 @@ type t =
 
 val create_context : Procdesc.t -> gocfg -> Procdesc.Node.t -> t
 
-val create_cfg : SourceFile.t -> gocfg
+val create_cfg : gomodule -> SourceFile.t -> gocfg
+
+val create_module : string list -> gomodule

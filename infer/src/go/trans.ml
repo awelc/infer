@@ -41,16 +41,26 @@ let create_node proc_desc instructions loc kind =
 let create_node_method proc_desc instructions loc =
   create_node proc_desc instructions loc (Procdesc.Node.Stmt_node MethodBody)
 
+let rec get_def (go_cfg : Context.gocfg) = function 
+  | `FuncType (func_type : Go_ast_to_json_t.func_type_type) 
+    -> go_cfg.func_types <- Context.FuncTypesMap.add func_type.uid func_type go_cfg.func_types
+  | `Field (field : Go_ast_to_json_t.field_type) 
+    -> go_cfg.fields <- Context.FieldsMap.add field.uid field go_cfg.fields
+
 let rec create_fn_desc (go_cfg : Context.gocfg) = function
   | `FuncDecl (decl) -> ignore (trans_func_decl go_cfg decl)
   | `FuncDeclRef (ref) -> if (not(Context.FuncDeclsMap.mem ref go_cfg.func_decls)) then raise (Failure "Function definition not found")
   | `GenDecl (decl) -> raise (Failure "Should not happen")
 
-and trans_res_type = function
-  | `Field (field) -> trans_type field.t
+and get_field (go_cfg : Context.gocfg) = function
+    | `FieldRef (ref) -> Context.FieldsMap.find ref go_cfg.fields
 
-and trans_param = function
-  | `Field (field) ->
+and trans_res_type go_cfg f =
+  let field = get_field go_cfg f in
+    trans_type field.t
+
+and trans_param go_cfg f =
+  let field = get_field go_cfg f in
     if (List.length field.names > 1) then raise (Failure "Function parameter can have only one name") else (
       let ident = List.nth_exn field.names 0 in
       let param_type = trans_type field.t in
@@ -70,7 +80,6 @@ and get_var_key ident =
     | None -> raise (Failure "Variable reference must point to a definition")
     | Some (obj) -> (
       match obj with 
-        | `Field (o) -> Context.VarKey.mk n o.uid
         | `FieldRef (ref) -> Context.VarKey.mk n ref
         | `ValueSpec (o) -> Context.VarKey.mk n o.uid
         | `ValueSpecRef (ref) -> Context.VarKey.mk n ref
@@ -116,16 +125,30 @@ and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t *
       | `BasicLit (lit) ->
         trans_lit context lit.kind lit.value
       | `CallExpr (expr) ->
-        let call_proc_desc = (
+        let rec get_func_desc n = (
+          match Context.FuncSigsMap.find_opt n context.go_cfg.go_module.func_sigs with
+            | Some (ret_type) -> Typ.Procname.Go (Typ.Procname.Go.make n), ret_type
+              (* function description not present in the current file; keep evaluating files until it getx computed *)
+            | None -> do_file context.go_cfg.go_module; get_func_desc n
+          )
+        in
+        let name, ret_type = (
           match expr.fn with
             | `Ident (ident) -> 
                 match ident.obj with
-                  | None -> raise (Failure "Call expression must point to a function declaration")
+                  | None ->  get_func_desc ident.id
                   | Some (o) -> (
-                      match o with
-                        | `FuncDecl (decl) -> trans_func_decl context.go_cfg decl
-                        | `FuncDeclRef (ref) -> Context.FuncDeclsMap.find ref context.go_cfg.func_decls
-                    )
+                    match o with
+                      | `FuncDecl (decl) -> 
+                        let call_proc_desc = trans_func_decl context.go_cfg decl in
+                          Procdesc.get_proc_name call_proc_desc, Procdesc.get_ret_type call_proc_desc
+                      | `FuncDeclRef (ref) -> (
+                        match Context.FuncDeclsMap.find_opt ref context.go_cfg.func_decls with
+                          | Some (call_proc_desc) -> Procdesc.get_proc_name call_proc_desc, Procdesc.get_ret_type call_proc_desc
+                          | None -> get_func_desc ident.id
+                            
+                      )                        
+                  )
         )
         in
         let instrs, call_args =
@@ -135,8 +158,7 @@ and trans_exp (context : Context.t) (ex : expr_type) : (Sil.instr list * Exp.t *
               (instrs_accu @ instrs, args_accu @ [(ex, ex_type)]) )
             ~init:([], []) expr.args
         in
-        let func_name = Exp.Const (Const.Cfun (Procdesc.get_proc_name call_proc_desc)) in
-        let ret_type = Procdesc.get_ret_type call_proc_desc in
+        let func_name = Exp.Const (Const.Cfun name) in
         let id = Ident.create_fresh Ident.knormal in
         let loc = line_loc_mk_proc context.proc_desc expr.lparen.ln in
         let call_instr = Sil.Call((id, ret_type), func_name, call_args, loc, CallFlags.default) in
@@ -409,8 +431,8 @@ and trans_labeled_stmt (context: Context.t) (stmt: labeled_stmt_type) =
     let first_node, last_node, nodes_to_next = trans_stmt context stmt.stmt in
       (* connect skip node identifying the label with actual statement node *)
       Procdesc.node_set_succs_exn proc_desc skip_node [first_node] [context.exit_node];
-      context.labeled_stmts <- Context.LabeledStmtsMap.add stmt.uid (skip_node, last_node, nodes_to_next) context.labeled_stmts;    
-      skip_node, last_node, nodes_to_next
+      context.labeled_stmts <- Context.LabeledStmtsMap.add stmt.uid (skip_node, last_node, nodes_to_next) context.labeled_stmts;
+      skip_node, last_node, nodes_to_next      
 
 and trans_labeled_stmt_ref (context: Context.t) ref =
   Context.LabeledStmtsMap.find ref context.labeled_stmts
@@ -482,36 +504,39 @@ and trans_gen_decl context decl =
       | "var" -> trans_spec context decl.ln (List.nth_exn decl.specs 0)
   )
 
-and trans_func_decl (go_cfg : Context.gocfg) decl : Procdesc.t =
-  let func_type = decl.func_type in
+and get_func_desc (go_cfg : Context.gocfg) = function
+  | `FuncTypeRef (ref) -> Context.FuncTypesMap.find ref go_cfg.func_types
+
+and trans_func_decl (go_cfg : Context.gocfg) (decl : func_decl_type) : Procdesc.t =
+  let func_type = get_func_desc go_cfg decl.func_desc in
   if (List.length func_type.results > 1) then raise (Failure "Only one result value supported for now") else (
     let source_file = go_cfg.src_file in
     let body = decl.body in
     let func_name = Typ.Procname.Go (Typ.Procname.Go.make decl.name.id) in
     let loc_start = line_loc_mk_src source_file func_type.ln in
     let loc_exit = line_loc_mk_src source_file body.rbrace.ln in
-    let params = List.map ~f:trans_param func_type.params in
+    let params = List.map ~f:(fun (p) -> trans_param go_cfg p) func_type.params in
     let proc_attributes = { (ProcAttributes.default source_file func_name) with
         formals = params;
         is_defined = true;
         loc = loc_start;
-        ret_type = trans_res_type (List.nth_exn func_type.results 0) } in
+        ret_type = trans_res_type go_cfg (List.nth_exn func_type.results 0) } in
     let proc_desc = Cfg.create_proc_desc go_cfg.cfg proc_attributes in
     let start_node = create_node proc_desc [] loc_start Procdesc.Node.Start_node in
     let exit_node = create_node proc_desc [] loc_exit Procdesc.Node.Exit_node in
     let context = Context.create_context proc_desc go_cfg exit_node in
-    let param_to_local param =
-      match param with 
-        | `Field (field) ->
-          if (List.length field.names > 1) then raise (Failure "Function parameter can have only one name") else (
-            let ident = List.nth_exn field.names 0 in
-            let n = ident.id in
-            let t = trans_type field.t in
-            let var_key = get_var_key ident in
-            let var_name = Context.VarKey.to_mangled var_key in
-            let pvar = Pvar.mk var_name func_name in
-              context.locals_map <- Context.LocalsMap.add var_key (pvar, t) context.locals_map
-          )
+    let param_to_local param = (
+      let field = get_field go_cfg param in
+        if (List.length field.names > 1) then raise (Failure "Function parameter can have only one name") else (
+          let ident = List.nth_exn field.names 0 in
+          let n = ident.id in
+          let t = trans_type field.t in
+          let var_key = get_var_key ident in
+          let var_name = Context.VarKey.to_mangled var_key in
+          let pvar = Pvar.mk var_name func_name in
+            context.locals_map <- Context.LocalsMap.add var_key (pvar, t) context.locals_map
+        )
+      )
     in
       (* add parameters to the list of local variables *)
       List.iter ~f:param_to_local func_type.params;
@@ -533,14 +558,52 @@ and trans_decl context = function
   | `FuncDeclRef (ref) -> raise (Failure "Should not happen")
   | `GenDecl (decl) ->  trans_gen_decl context decl
 
+and go_to_json = Config.lib_dir ^ "/go/src_to_ast_json.go"
 
-let go_to_json = Config.lib_dir ^ "/go/src_to_ast_json.go"
+and get_func (go_cfg : Context.gocfg) decl =
+  let func_type = get_func_desc go_cfg decl.func_desc in
+    if (List.length func_type.results > 1) then raise (Failure "Only one result value supported for now") else (
+      let ret_type = trans_res_type go_cfg (List.nth_exn func_type.results 0) in
+        go_cfg.go_module.func_sigs <- Context.FuncSigsMap.add decl.name ret_type go_cfg.go_module.func_sigs
+    )
 
-let compute_icfg source_file =
+and compute_icfg go_module source_file =
   let stdout = Unix.open_process_in ("go run " ^ go_to_json ^ " -- " ^ (SourceFile.to_string source_file)) in
   let go_file = Atdgen_runtime.Util.Json.from_channel read_file_type stdout in
   let _ = Unix.close_process_in stdout in
     print_endline (Pretty.pretty_file go_file); 
-    let go_cfg = Context.create_cfg source_file in
+    let go_cfg = Context.create_cfg go_module source_file in
+     List.iter ~f:(fun (def) -> get_def go_cfg def) go_file.defs;
+     List.iter ~f:(fun (func) -> get_func go_cfg func) go_file.funcs;
      List.iter ~f:(fun (decl) -> create_fn_desc go_cfg decl) go_file.decls;
       go_cfg.cfg
+
+and do_file (go_module : Context.gomodule) =
+  match List.hd go_module.files with
+    | Some (file_path) ->
+      go_module.files <- List.tl_exn go_module.files;
+      ( try
+       let source_file = SourceFile.create file_path in
+       let cfg = compute_icfg go_module source_file in                             
+         DB.Results_dir.init source_file;
+         SourceFiles.add source_file cfg Tenv.Global None;
+         if Config.debug_mode || Config.frontend_tests then Dotty.print_icfg_dotty source_file cfg ;
+         ()
+        with
+          | Parsing.Parse_error -> printf "Syntax Error\n" 
+      );
+      Ident.NameGenerator.reset ();
+      do_file go_module
+    | None -> ()
+
+and do_files files =
+  let shell_cmd = "go build " ^ String.concat ~sep:(" ") files in
+  (  match Utils.with_process_in shell_cmd In_channel.input_all with
+    | log, Error err -> raise (Failure "Compilation failure")
+    | exception exn -> raise exn
+    | log, Ok () -> ()
+  );
+  let go_module = Context.create_module files in
+    Language.curr_language := Language.Go;
+    do_file go_module
+

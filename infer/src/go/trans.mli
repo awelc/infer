@@ -1,3 +1,3 @@
 open! IStd
 
-val compute_icfg : SourceFile.t -> Cfg.t
+val do_files: string list -> unit
